@@ -2,13 +2,14 @@
 
 A click-drag grid window tiler for **KDE Plasma 6 / KWin on Wayland**.
 
-Hold a global shortcut (default **Meta+Alt+D**) — a grid overlay appears — drag
-a rectangle across cells — release — the previously-active window snaps to that
+Hold a global shortcut (default **Meta+Alt+D**) -> a grid overlay appears -> drag
+a rectangle across the cells -> release -> the active window snaps to that
 region.
 
 Inspired by [Divvy](https://mizage.com/divvy/) and FancyZones, implemented as a
-**declarative KWin script** with no Qt/KF build dependencies: just symlink one
-directory into `~/.local/share/kwin/scripts/` and enable it.
+**declarative KWin script**.
+
+Also available from the [KDE Store](https://store.kde.org/p/2366344), and by extension, available directly from KWin Scripts -> "Get new..."
 
 ![VibeTiles demo](https://github.com/Ivan-Malinovski/vibetiles/releases/download/v0.3.2/vibetiles-demo.gif)
 

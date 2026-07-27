@@ -635,6 +635,31 @@ PlasmaCore.Dialog {
         if (!e[key]) e[key] = side;  // first chain to claim an edge wins
     }
 
+    // Is `side` of the dragged window sitting on the work area's own boundary?
+    //
+    // Such a border isn't a shared splitter, it's the screen edge, and every window
+    // parked against it lines up there by construction rather than by being tiled
+    // against this one. Two half-width windows side by side both have their top edge
+    // at the top of the screen: dragging one's top edge down used to drag the other's
+    // with it, which is not what "linked" is for - the user is resizing one window
+    // away from the edge, not moving a divider they share.
+    //
+    // Uses the same tolerance as edge matching, and the work area (PlacementArea, so
+    // panel struts are excluded) of the dragged window's own output.
+    function linkedEdgeIsScreenBoundary(win, side) {
+        if (win.output == null) return false;
+        let area;
+        try {
+            area = Workspace.clientArea(KWin.PlacementArea, win.output, Workspace.currentDesktop);
+        } catch (e) {
+            return false;  // can't tell - fall through to the old linking behaviour
+        }
+        if (!area || area.width <= 0 || area.height <= 0) return false;
+        const line = root.linkedEdgeCoord(win.frameGeometry, side);
+        const bound = root.linkedEdgeCoord(area, side);
+        return Math.abs(line - bound) <= root.linkedTol;
+    }
+
     // Walk the border that the dragged window's `side` edge lies on, collecting every
     // window with an edge on that same line, reachable by a contiguous run of windows
     // alongside it. Contiguity is what makes this safe: matching the line coordinate alone
@@ -701,7 +726,12 @@ PlasmaCore.Dialog {
         // the drag is under way (and a corner drag moves two). Sides whose delta stays 0
         // cost nothing per step beyond the no-op check.
         const sides = ["L", "R", "T", "B"];
-        for (let i = 0; i < sides.length; i++) root.collectBorderChain(win, sides[i], acc);
+        for (let i = 0; i < sides.length; i++) {
+            // a border that IS the screen edge links nothing - see
+            // linkedEdgeIsScreenBoundary()
+            if (root.linkedEdgeIsScreenBoundary(win, sides[i])) continue;
+            root.collectBorderChain(win, sides[i], acc);
+        }
         // cache each neighbour's size limits once, up front - they don't change mid-drag,
         // so re-deriving them (min/max width/height, each its own try/catch) on every step
         // for every neighbour was pure overhead on the hot path, worse the bigger the

@@ -177,6 +177,11 @@ PlasmaCore.Dialog {
         // name and size are split on the LAST separator, so output names containing '='
         // or ':' (rare, but nothing forbids them) still parse. Blank lines and #-comments
         // are skipped so the field can carry the example as a comment.
+        //
+        // The value is one or two comma-separated WxH pairs:
+        //   HDMI-A-1 = 2x6              grid override only
+        //   HDMI-A-1 = 2x6, 300x400     grid override + compact overlay size in px
+        // The second pair overrides compactWidth/compactHeight for that output only.
         const out = {};
         const lines = s.split("\n");
         for (let i = 0; i < lines.length; i++) {
@@ -188,13 +193,27 @@ PlasmaCore.Dialog {
                 continue;
             }
             const name = line.substring(0, cut).trim();
-            const size = line.substring(cut + 1).trim().split(/[xX*]/);
+            const parts = line.substring(cut + 1).split(",");
+            const size = parts[0].trim().split(/[xX*]/);
             const cols = parseInt(size[0], 10), rows = parseInt(size[1], 10);
             if (name === "" || size.length !== 2 || !(cols > 0) || !(rows > 0)) {
                 console.warn("vibetiles: skipping unparseable monitor line:", String(line).substring(0, 80));
                 continue;
             }
-            out[name] = { gridCols: cols, gridRows: rows };
+            const entry = { gridCols: cols, gridRows: rows };
+            // an unparseable second pair is a warning, not a reason to drop the grid
+            // override the line also carries - that half parsed fine.
+            if (parts.length > 1) {
+                const px = parts[1].trim().split(/[xX*]/);
+                const cw = parseInt(px[0], 10), ch = parseInt(px[1], 10);
+                if (px.length === 2 && cw > 0 && ch > 0) {
+                    entry.compactWidth = cw;
+                    entry.compactHeight = ch;
+                } else {
+                    console.warn("vibetiles: ignoring unparseable compact size on monitor line:", String(line).substring(0, 80));
+                }
+            }
+            out[name] = entry;
         }
         return out;
     }
@@ -239,17 +258,27 @@ PlasmaCore.Dialog {
     // from both the shortcut-driven grid and dragTriggered's cursor-following box.
     property bool autoMode: false
 
-    // holding Shift temporarily doubles the grid resolution for finer placement -
-    // all cell math below uses effCols/effRows instead of the raw config values
-    property bool shiftHeld: false
-    property int effCols: shiftHeld ? activeGridCols * 2 : activeGridCols
-    property int effRows: shiftHeld ? activeGridRows * 2 : activeGridRows
+    // holding Alt temporarily doubles the grid resolution for finer placement -
+    // all cell math below uses effCols/effRows instead of the raw config values.
+    // Alt rather than Shift: Shift is claimed by too many other things (KWin's own
+    // drag behaviours, app-level range selection) and interfered in practice.
+    property bool fineHeld: false
+    property int effCols: fineHeld ? activeGridCols * 2 : activeGridCols
+    property int effRows: fineHeld ? activeGridRows * 2 : activeGridRows
 
     property bool isCompact: overlayMode === "compact" || root.autoMode
     property real availLocalX: availGeo.x - screenGeo.x
     property real availLocalY: availGeo.y - screenGeo.y
-    property real canvasWidth: isCompact ? Math.min(compactWidth, availGeo.width) : availGeo.width
-    property real canvasHeight: isCompact ? Math.min(compactHeight, availGeo.height) : availGeo.height
+    // a portrait monitor gets the configured compact size flipped (480x300 -> 300x480), so
+    // the mini grid keeps the screen's orientation instead of always being landscape.
+    // A per-output size from monitorsJson wins over both, unflipped (see rehomeForScreen).
+    property bool portraitScreen: availGeo.height > availGeo.width
+    property int activeCompactWidth: 0
+    property int activeCompactHeight: 0
+    property real compactW: activeCompactWidth > 0 ? activeCompactWidth : (portraitScreen ? compactHeight : compactWidth)
+    property real compactH: activeCompactHeight > 0 ? activeCompactHeight : (portraitScreen ? compactWidth : compactHeight)
+    property real canvasWidth: isCompact ? Math.min(compactW, availGeo.width) : availGeo.width
+    property real canvasHeight: isCompact ? Math.min(compactH, availGeo.height) : availGeo.height
     // drag-triggered activations always spawn the compact box at the cursor, regardless of
     // the compactAtCursor setting - it's inherently about following the mouse mid-drag.
     // autoMode overrides this the other way: it always sits fixed top-center (see below),
@@ -351,6 +380,12 @@ PlasmaCore.Dialog {
         const override = root.monitorOverrides[screen.name];
         root.activeGridCols = (override && override.gridCols > 0) ? override.gridCols : root.gridCols;
         root.activeGridRows = (override && override.gridRows > 0) ? override.gridRows : root.gridRows;
+        // 0 means "not overridden" - compactW/compactH then fall back to the global
+        // compactWidth/compactHeight, with the portrait flip applied. An explicit
+        // per-output size is taken literally instead (the user already wrote it in that
+        // monitor's own orientation; flipping it would fight the setting).
+        root.activeCompactWidth = (override && override.compactWidth > 0) ? override.compactWidth : 0;
+        root.activeCompactHeight = (override && override.compactHeight > 0) ? override.compactHeight : 0;
         // PlasmaCore.Dialog resizes/repositions itself internally (to track mainItem size,
         // keep itself on-screen, etc); any such write from its C++ side permanently severs
         // a declarative x:/y:/width:/height: binding to screenGeo (confirmed live - once
@@ -401,7 +436,7 @@ PlasmaCore.Dialog {
 
         if (isCompact) refreshWindowList();
 
-        root.shiftHeld = false;
+        root.fineHeld = false;
         root.pickerOpen = false;
         root.visible = true;
         // PlasmaQuick::Dialog's prototype is QQuickWindow, so it has requestActivate().
@@ -527,7 +562,7 @@ PlasmaCore.Dialog {
 
         rehomeForScreen(screenAt(spawnCursorPos));
 
-        root.shiftHeld = false;
+        root.fineHeld = false;
         root.pickerOpen = false;
         root.dragging = false;
         root.visible = true;
@@ -817,11 +852,11 @@ PlasmaCore.Dialog {
     function onNativeDragStepped(win, rect) {
         if (win !== root.nativeDragWindow) return;
         root.stepLinkedResize(win, rect);
-        // shiftHeld is otherwise updated off mouse-modifier flags on the canvas
+        // fineHeld is otherwise updated off mouse-modifier flags on the canvas
         // MouseArea, but the overlay's MouseArea gets no events during a native
         // drag (the compositor keeps the grab). KWin's QML host doesn't expose
         // Qt.application.queryKeyboardModifiers(), so we have to live without
-        // shift-doubling during native drag activations - same as before this
+        // Alt-doubling during native drag activations - same as before this
         // script existed; restore parity rather than ship a broken call.
         if (root.visible && root.dragTriggered && root.targetWindow === win) {
             // follow the cursor across monitors, same as the autoMode branch below: the
@@ -1997,12 +2032,12 @@ PlasmaCore.Dialog {
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            // shift state is read straight off the mouse event's modifiers instead of a
+            // modifier state is read straight off the mouse event's flags instead of a
             // Keys.onPressed handler - these script-owned windows don't reliably receive
             // real keyboard focus (confirmed live: forceActiveFocus() didn't fix it), but
             // pointer events always carry accurate modifier flags regardless of focus
             onPositionChanged: (mouse) => {
-                root.shiftHeld = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                root.fineHeld = (mouse.modifiers & Qt.AltModifier) !== 0;
                 if (root.dragging) root.dragCurrent = Qt.point(mouse.x, mouse.y);
             }
             onPressed: (mouse) => {
@@ -2014,7 +2049,7 @@ PlasmaCore.Dialog {
                     root.hide();
                     return;
                 }
-                root.shiftHeld = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                root.fineHeld = (mouse.modifiers & Qt.AltModifier) !== 0;
                 root.pickerOpen = false;
                 root.dragStart = Qt.point(mouse.x, mouse.y);
                 root.dragCurrent = root.dragStart;

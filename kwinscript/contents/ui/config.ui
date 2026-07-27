@@ -306,7 +306,7 @@
       <item>
        <widget class="QLabel" name="label_monitorsHint">
         <property name="text">
-         <string>One monitor per line, as &lt;b&gt;name = columns x rows&lt;/b&gt; — for example:&lt;br/&gt;&lt;tt&gt;DP-2 = 8x6&lt;/tt&gt;&lt;br/&gt;&lt;tt&gt;HDMI-A-1 = 2x6&lt;/tt&gt;&lt;br/&gt;Names must match &lt;b&gt;System Settings → Display Configuration&lt;/b&gt; exactly. Lines starting with # are ignored. Leave empty to use the default grid above on every monitor. (The older JSON format still works if you already have one saved.)</string>
+         <string>One monitor per line, as &lt;b&gt;name = columns x rows&lt;/b&gt;, optionally followed by &lt;b&gt;, width x height&lt;/b&gt; in pixels to override the compact overlay size on that monitor — for example:&lt;br/&gt;&lt;tt&gt;DP-2 = 8x6&lt;/tt&gt;&lt;br/&gt;&lt;tt&gt;HDMI-A-1 = 2x6, 300x400&lt;/tt&gt;&lt;br/&gt;Without a size, the compact overlay uses the width/height above, swapped on a portrait monitor. Names must match &lt;b&gt;System Settings → Display Configuration&lt;/b&gt; exactly. Lines starting with # are ignored. Leave empty to use the default grid above on every monitor. (The older JSON format still works if you already have one saved.)</string>
         </property>
         <property name="wordWrap">
          <bool>true</bool>

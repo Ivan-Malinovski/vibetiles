@@ -69,8 +69,18 @@ fi
 
 echo "bumping ${CURRENT_ID} -> ${NEW_ID}"
 
-# 1. update metadata.json so the live package description points at the new ID
-sed -i "s/${CURRENT_ID}/${NEW_ID}/g" kwinscript/metadata.json
+# 1. update metadata.json so the live package description points at the new ID.
+#    Rewrite *whatever* vibetiles<N> id is in there, not specifically CURRENT_ID:
+#    CURRENT_ID comes from the symlink name, which can legitimately differ from
+#    the id in metadata.json (e.g. after a fresh clone over an existing install).
+#    Substituting CURRENT_ID then matches nothing, silently leaving the package
+#    declaring a stale id while its directory carries the new one - which the
+#    KWin script config dialog reports as "could not locate package metadata".
+sed -i -E "s/vibetiles[0-9]+/${NEW_ID}/g" kwinscript/metadata.json
+if ! grep -q "\"${NEW_ID}\"" kwinscript/metadata.json; then
+    echo "error: metadata.json still does not declare ${NEW_ID} after rewrite - fix it by hand" >&2
+    exit 1
+fi
 
 # 2. enumerate every key currently set under [Script-<oldId>] in kwinrc so we
 #    can re-apply them under the new section name. kreadconfig6 can't list keys;

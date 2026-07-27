@@ -47,6 +47,11 @@ privileged, synchronous access to `Workspace.*`. No D-Bus, no daemon.
   enough. Bumps `metadata.json` to the next `vibetiles<N>`, migrates every
   kwinrc key forward, disables + unloads the old ID, verifies the new one
   loads. Check `KPlugin.Id` in `metadata.json` for the current live value.
+  The live id comes from the **symlink name**, which can drift from the id in
+  `metadata.json` (a fresh clone over an existing install does this). The
+  rewrite therefore substitutes any `vibetiles<N>` it finds, and hard-fails if
+  the file doesn't declare the new id afterwards — the symptom of that drift is
+  the config dialog erroring with "could not locate package metadata".
 - **`./build.sh`** — produces `vibetiles.kwinscript`, a release bundle
   under the canonical (non-numeric) id `vibetiles`, for "Install from
   File...". Doesn't touch the numbered dev install. **Don't have both
@@ -67,6 +72,28 @@ privileged, synchronous access to `Workspace.*`. No D-Bus, no daemon.
   own `isScriptLoaded` check ever comes back false again, load it by hand:
   `qdbus-qt6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadDeclarativeScript
   ~/.local/share/kwin/scripts/<id>/contents/ui/main.qml <id>`.
+- **Old generations keep running after `unloadScript`, and only a KWin restart
+  evicts them** — confirmed live: after unloading and even *deleting the package*
+  of a generation, its instance kept handling native drags and drawing its own
+  overlay, reading its own (now-orphaned) `[Script-<oldId>]` kwinrc section. The
+  newest generation owns the global shortcut grab, so the symptom is a split
+  personality: the shortcut drives the new code while drag-triggered paths, hot
+  corners and the auto-picker still come from an old one — with the old one's
+  settings, which look "impossible" against the live config section. Diagnose by
+  counting instances (`qdbus-qt6 org.kde.KWin | grep '^/Scripting/Script'`)
+  against installed packages (`ls ~/.local/share/kwin/scripts/`); more instances
+  than packages means stale generations. `isScriptLoaded` is useless here — it
+  tracks the kwinrc *enabled flag*, not the runtime, and returns true for ids
+  whose package is gone. Clean up with
+  `kwriteconfig6 --file kwinrc --group Plugins --key vibetiles<N>Enabled --delete`
+  for every stale id, then log out/in (or restart
+  `plasma-kwin_wayland.service`, which kills every Wayland app). Bumping a lot
+  in one session accumulates these, so re-check before trusting any live test.
+- **Never use System Settings → "Uninstall" on the dev install** — the package
+  is a *symlink* into the repo, and KPackage's uninstall follows it and deletes
+  `kwinscript/` from the working tree, taking uncommitted edits with it
+  (happened; recovered via `git restore kwinscript`). Remove the symlink
+  instead: `rm ~/.local/share/kwin/scripts/<id>`.
 - D-Bus CLI binary is `qdbus-qt6` (`qdbus6` does not exist here).
 - Consolidating the dev id to the canonical `vibetiles` string is possible
   now (that namespace has never loaded, so no restart needed) but would
@@ -133,14 +160,14 @@ Configure..., or `kwriteconfig6`:
 | `gridCols` | Int | 6 | |
 | `gridRows` | Int | 4 | |
 | `mode` | Int | 0 | 0=fullscreen, 1=compact |
-| `compactWidth` | Int | 480 | px |
-| `compactHeight` | Int | 300 | px |
+| `compactWidth` | Int | 480 | px; swapped with `compactHeight` on a portrait monitor |
+| `compactHeight` | Int | 300 | px; swapped with `compactWidth` on a portrait monitor |
 | `gap` | Int | 8 | px inset applied to each edge of the final placed window |
 | `resizeOverlapping` | Bool | true | shrink other windows whose edge is fully covered by a new placement |
 | `relocateCovered` | Bool | true | move windows a placement *completely* covers to the largest free region |
 | `compactAtCursor` | Bool | false | compact mode: spawn overlay centered on the mouse cursor |
 | `hotCorner` | Int | 0 | 0=none,1=topLeft,2=topRight,3=bottomLeft,4=bottomRight |
-| `monitorsJson` | String | `{}` | JSON map of output name → `{gridCols, gridRows}` override |
+| `monitorsJson` | String | `{}` | per-output overrides, one `NAME = COLSxROWS[, WxH]` line each (legacy JSON map of name → `{gridCols, gridRows, compactWidth, compactHeight}` still accepted); the optional second pair overrides the compact size on that output |
 | `dragAutoTrigger` | Bool | false | auto-show a top-center picker on any native window drag past a distance threshold |
 | `linkedResize` | Bool | false | co-resize windows sharing the dragged edge |
 | `autoAtCursor` | Bool | false | auto-trigger picker spawns trailing the cursor's drag motion instead of fixed top-center |

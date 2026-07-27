@@ -107,7 +107,7 @@ PlasmaCore.Dialog {
     property string monitorsJsonRaw: "￿"
     // grid size actually in effect for the screen the overlay is showing on - the
     // per-monitor override if one matches targetScreenObj.name, else the defaults above.
-    // effCols/effRows (the shift-doubling multiplier) are derived from these, not
+    // effCols/effRows (the Alt-doubling multiplier) are derived from these, not
     // directly from gridCols/gridRows, so overrides apply everywhere sizing does.
     property int activeGridCols: gridCols
     property int activeGridRows: gridRows
@@ -444,7 +444,7 @@ PlasmaCore.Dialog {
         // regardless (confirmed live: Escape/Keys.onEscapePressed never fires even
         // with forceActiveFocus() at the right time) - so skip the Item-level
         // focus attempt that was here before, since it both fails AND now refers
-        // to a deleted item. Shift is read off mouse-event modifiers on the canvas
+        // to a deleted item. Alt (fine grid) is read off mouse-event modifiers on the canvas
         // MouseArea; Escape has no such workaround, so cancel is right-click.
         root.requestActivate();
 
@@ -1796,7 +1796,7 @@ PlasmaCore.Dialog {
         // the grid-line and cell-highlight Repeater delegates all resolve to the same two
         // translucent theme tints; compute each once here (in mainItem's Complementary
         // scope) rather than reconstructing an identical Qt.rgba per delegate every time
-        // Shift-doubling or a grid-size change rebuilds the delegate set. Constant during a
+        // Alt-doubling or a grid-size change rebuilds the delegate set. Constant during a
         // drag, so these don't recompute per frame - this just removes the per-delegate dup.
         property color gridLineColor: root.themeAlpha(Kirigami.Theme.textColor, 0.2)
         property color cellHighlightColor: root.themeAlpha(Kirigami.Theme.highlightColor, 0.27)
@@ -2224,7 +2224,7 @@ PlasmaCore.Dialog {
 
     // No Item-level Keys handlers here: confirmed live, script-owned windows don't
     // reliably receive real keyboard focus even with forceActiveFocus(), so Keys.*
-    // doesn't fire. Cancel is right-click on the canvas MouseArea; Shift is read off
+    // doesn't fire. Cancel is right-click on the canvas MouseArea; Alt (fine grid) is read off
     // mouse-event modifiers (and off Qt.application.queryKeyboardModifiers() in the
     // native-drag paths where the canvas MouseArea gets no events at all - see
     // onNativeDragStepped).

@@ -108,8 +108,26 @@ privileged, synchronous access to `Workspace.*`. No D-Bus, no daemon.
 - The generic KWin-script config dialog only does 1:1 scalar binding; no
   per-row/dynamic UI. Raw-JSON `QPlainTextEdit` is the zero-build tradeoff.
 - Script-owned overlay windows never reliably get real keyboard focus
-  (`Keys.onEscapePressed` never fires) — shift-state comes from mouse-event
-  modifiers, cancel is bound to right-click.
+  (`Keys.onEscapePressed` never fires) — the fine-grid modifier state
+  (`fineHeld`, **Alt**) comes from mouse-event modifier flags, cancel is bound
+  to right-click. Alt rather than Shift: Shift collided with other things in
+  practice. Two consequences of sourcing it from mouse events, both confirmed
+  live and both inherent, not bugs to re-investigate:
+  - **The pointer has to move for the state to update.** Pressing or releasing
+    Alt while the mouse is still changes nothing until the next mouse event.
+    Barely noticeable mid-drag (the mouse is moving anyway), obvious if you
+    hold Alt first and expect the grid to redraw.
+  - **No modifier at all during native drags** (drag-triggered and
+    `dragAutoTrigger` paths): the compositor keeps the pointer grab, so the
+    overlay's MouseArea receives nothing. Alt-doubling is simply unavailable
+    there, and **holding Alt before the drag starts doesn't help either** —
+    there is nothing to read it from. Probed the host directly (confirmed
+    live): `Workspace` and `KWin` expose no modifier/key/input members at all,
+    `Qt.application` has only `state`/`stateChanged`, and
+    `queryKeyboardModifiers` is `undefined`. Don't re-investigate this; the
+    only mechanism that demonstrably fires mid-native-drag is a **global
+    shortcut** (that's how drag-triggered activation works), so a fine-grid
+    latch would have to be a `ShortcutHandler`, not a held modifier.
 - `ShortcutHandler` has no `enabled` property (fails component load if
   assigned) — its global grab lives for the script's whole lifetime, unlike
   `ScreenEdgeHandler` which does support live `enabled:` rebinding.

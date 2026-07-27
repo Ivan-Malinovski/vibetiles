@@ -22,7 +22,7 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
     retargets that window and follows the mouse for the rest of the drag.
   - **Auto-trigger** (opt-in) shows a picker after any native window drag past a
     distance threshold — no shortcut held at all.
-- **Shift to double resolution** at drag time for fine-grained placement.
+- **Alt to double resolution** at drag time for fine-grained placement.
 - **Hot-corner activation** — drag from a configured screen corner to spawn the
   overlay.
 - **Compact overlay** mode for small grids and small screens, with optional
@@ -67,7 +67,7 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 | Action | Result |
 |---|---|
 | Hold `Meta+Alt+D`, drag across cells, release | active window snaps to that region |
-| Hold `Shift` while dragging | doubles the grid resolution for a finer placement |
+| Hold `Alt` while dragging | doubles the grid resolution for a finer placement (needs pointer movement to register; unavailable during drag-triggered/auto-picker activations) |
 | **Right-click** | cancels the overlay |
 | Hold the shortcut *during* a window drag | overlay retargets the dragged window |
 | `Meta+Alt+E` | expands the active window to fill the free space around it |
@@ -75,7 +75,7 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 
 Cancel is right-click rather than `Escape` deliberately: script-owned overlay
 windows never reliably receive real keyboard focus under KWin, so a key handler
-can't be counted on. Shift state is read from mouse-event modifiers for the same
+can't be counted on. Modifier state is read from mouse-event flags for the same
 reason.
 
 The live preview rectangle tracks the raw cursor, not the gridlines — it only

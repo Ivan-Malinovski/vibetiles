@@ -98,6 +98,12 @@ PlasmaCore.Dialog {
     // edge-drop. Larger than the overlay path's 10px snap since it gates a whole gesture
     // rather than nudging an already-placed edge, and the cursor rarely lands pixel-exact.
     property int edgeDropThreshold: 16
+    // corner zone for the same gesture: how far along each axis still counts as "at the
+    // corner" once the drop already qualifies as an edge-drop on one axis. Deliberately much
+    // wider than edgeDropThreshold - the intersection of two 16px bands is a 16x16 target,
+    // which can't be hit deliberately. A quarter-screen drop is a distinct enough intent to
+    // deserve the last ~120px of each edge.
+    property int cornerDropThreshold: 120
     // per-output {gridCols, gridRows} overrides, keyed by output name (e.g. "DP-2"),
     // parsed from the monitorsJson config entry
     property var monitorOverrides: ({})
@@ -1734,6 +1740,15 @@ PlasmaCore.Dialog {
     // Homes root state to the cursor's screen as a side effect: occupiedRects / expandRectFor
     // read it, the preview overlay's geometry follows screenGeo, and commit() needs it. Safe
     // because the caller acts only on the returned rect - nothing is placed unless non-null.
+    // Overlapping part of two rects. Width/height come back 0 (never negative) when they
+    // don't overlap, so callers can test either dimension.
+    function rectIntersect(a, b) {
+        const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+        const x2 = Math.min(a.x + a.width, b.x + b.width);
+        const y2 = Math.min(a.y + a.height, b.y + b.height);
+        return Qt.rect(x1, y1, Math.max(0, x2 - x1), Math.max(0, y2 - y1));
+    }
+
     function edgeDropTargetRect(win) {
         if (!win || !root.isRealWindow(win)) return null;
         const p = Workspace.cursorPos;
@@ -1750,19 +1765,45 @@ PlasmaCore.Dialog {
         if (!nearLeft && !nearRight && !nearTop && !nearBottom) return null;
         root.rehomeForScreen(screen);
         const availGeo = root.availGeo;
+        // Corners get a much more forgiving zone than edges: reaching the drop zone at all
+        // only needs one axis within edgeDropThreshold (16px), so requiring both axes within
+        // that same 16px would make the corner a 16x16 target nobody can hit on purpose.
+        // Same idea as Windows' snap corners - a band along the last stretch of each edge.
+        const ct = root.cornerDropThreshold;
+        const cLeft = (p.x - g.x) <= ct, cRight = (g.x + g.width - p.x) <= ct;
+        const cTop = (p.y - g.y) <= ct, cBottom = (g.y + g.height - p.y) <= ct;
+        // one horizontal AND one vertical edge at once, each unambiguous
+        const atCorner = (cLeft !== cRight) && (cTop !== cBottom);
+        // The exact half toward the edge, quarter at a corner - pixel-based, not
+        // grid-quantised, so it's a clean 50/50 regardless of the configured grid. At a
+        // corner both axes are halved, using the corner flags (the edge flags may have only
+        // one axis set, which is exactly why the wider zone exists).
+        const fLeft = atCorner ? cLeft : nearLeft, fRight = atCorner ? cRight : nearRight;
+        const fTop = atCorner ? cTop : nearTop, fBottom = atCorner ? cBottom : nearBottom;
+        const halfW = availGeo.width / 2, halfH = availGeo.height / 2;
+        let x = availGeo.x, y = availGeo.y, w = availGeo.width, h = availGeo.height;
+        if (fLeft && !fRight) { w = halfW; }
+        else if (fRight && !fLeft) { x = availGeo.x + halfW; w = halfW; }
+        if (fTop && !fBottom) { h = halfH; }
+        else if (fBottom && !fTop) { y = availGeo.y + halfH; h = halfH; }
+        const fractionRect = Qt.rect(x, y, w, h);
         // Other windows present: fill the reachable free pixels around the drop (expandRectFor
         // grows the window's slot into real empty space). Null only if it's already boxed in
         // on every side - then there's nothing to snap to, so no-op.
-        if (root.occupiedRects(win).length > 0) return root.expandRectFor(win, screen);
-        // Empty screen: the exact half toward the edge, quarter at a corner - pixel-based, not
-        // grid-quantised, so it's a clean 50/50 regardless of the configured grid.
-        const halfW = availGeo.width / 2, halfH = availGeo.height / 2;
-        let x = availGeo.x, y = availGeo.y, w = availGeo.width, h = availGeo.height;
-        if (nearLeft && !nearRight) { w = halfW; }
-        else if (nearRight && !nearLeft) { x = availGeo.x + halfW; w = halfW; }
-        if (nearTop && !nearBottom) { h = halfH; }
-        else if (nearBottom && !nearTop) { y = availGeo.y + halfH; h = halfH; }
-        return Qt.rect(x, y, w, h);
+        if (root.occupiedRects(win).length > 0) {
+            const grown = root.expandRectFor(win, screen);
+            if (!grown) return null;
+            // A corner drop is the edge drop capped to that quadrant: same fill, same
+            // stopping at whatever is in the way, half the size. Clipping the grown rect
+            // (rather than returning the quarter outright) keeps obstacles authoritative -
+            // a neighbour jutting into the quadrant still shortens the result.
+            if (!atCorner) return grown;
+            const clipped = root.rectIntersect(grown, fractionRect);
+            // degenerate clip (the free region barely reaches into the quadrant) - the
+            // gesture would commit something unusably small, so leave the window alone.
+            return (clipped.width >= 50 && clipped.height >= 50) ? clipped : null;
+        }
+        return fractionRect;
     }
 
     function finishDrag() {

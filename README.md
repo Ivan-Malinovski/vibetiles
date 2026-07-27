@@ -72,6 +72,7 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 | Hold the shortcut *during* a window drag | overlay retargets the dragged window |
 | `Meta+Alt+E` | expands the active window to fill the free space around it |
 | Drag a window onto a screen edge (with edge-drop on) | snaps + fills the reachable free space (or that half of the screen) |
+| Drag a window into a screen corner (with edge-drop on) | same, clipped to that quarter of the screen |
 
 Cancel is right-click rather than `Escape` deliberately: script-owned overlay
 windows never reliably receive real keyboard focus under KWin, so a key handler

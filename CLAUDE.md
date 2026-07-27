@@ -225,7 +225,13 @@ Meta+Alt+E (`expandToGap`), both in `Shortcuts.qml`.
   active window into the free space around it without moving it.
   Meta+Alt+E expands in place; native edge-drop (drag a window against a
   screen edge with the mouse) fills the reachable gap with a shadowed
-  preview. `expandRectFor()` is pixel-accurate (slot-space growth to the
+  preview. A **corner** drop is that same fill clipped to the corner's
+  quarter of the work area (`rectIntersect` of `expandRectFor`'s result with
+  the quadrant), so obstacles still shorten it — returning the quarter
+  outright made the gesture ignore windows in the way. Corners use their own
+  `cornerDropThreshold` (120px) rather than `edgeDropThreshold` (16px): the
+  intersection of two 16px bands is a 16x16 target nobody can hit on purpose,
+  which is why the pre-existing empty-screen quarter path almost never fired. `expandRectFor()` is pixel-accurate (slot-space growth to the
   nearest obstacle edge, both axis orders tried, larger result kept).
   Deliberately scoped to the native mouse path only — it does not fire
   from a grid-overlay placement (`finishDrag`), which commits exactly the

@@ -34,8 +34,9 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 - **Auto-trigger picker spawns trailing the cursor's drag motion** — drag away
   from the picker rather than into it. Leaving the picker clears the selection
   anchor, so a release past the edge doesn't commit a phantom resize.
-- **Per-monitor grid overrides** via JSON map (e.g. a 4K portrait side monitor
-  can run a 2×6 grid while the main stays at 6×4).
+- **Per-monitor grid overrides** — one `OUTPUT = COLSxROWS` line per screen (e.g.
+  a 4K portrait side monitor runs a 2×6 grid while the main stays at 6×4), with
+  an optional `, WxH` to give that screen its own compact overlay size.
 - **Multi-monitor follow** — the auto-trigger picker re-homes to whichever
   screen the dragged window is currently on, with per-screen grid sizes.
 - **Resize-overlap** — when committing to cells that overlap existing windows,
@@ -56,6 +57,19 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
   half of the screen when nothing else is there), with a live shadowed preview.
   Plays alongside auto-trigger — the picker handles mid-screen drags, the edge
   takes over at the edges.
+- **Restore size on drag** (opt-in) — Windows-style unsnap: the size a window
+  had *before* VibeTiles placed it is remembered, and handed back the moment you
+  drag that window out by its titlebar, with the window staying under your
+  cursor as it shrinks. Re-tiling a placed window keeps pointing at the original
+  size rather than the intermediate tile, and resizing the window by hand
+  forgets it (you picked a size yourself).
+- **Snap gaps** (opt-in) — closes the small leftover gap when a grid or compact
+  placement lands close to, but not flush against, a neighbour that was itself
+  resized off-grid. Capped by `snapGapMax` so it stays a gap-closer rather than
+  a second fill-the-screen trigger, and it never fires on a plain hand resize.
+- **Aspect-adaptive compact grid** — the compact overlay takes the shape of the
+  monitor it spawns on, so a cell in the miniature maps to the same shape of
+  region on a portrait screen as on a landscape one.
 - **Theme-aware overlay** — colors track the active Plasma color scheme (the
   same set Plasma's own OSDs use), so it follows Breeze Dark/Light or any custom
   scheme with no configuration.
@@ -122,11 +136,14 @@ Configure...**.
 | `relocateCovered` | true | move fully covered windows to the largest free grid region |
 | `linkedResize` | false | co-resize windows sharing the dragged edge |
 | `compactAtCursor` | false | compact mode spawns at the cursor |
+| `ghostPreview` | true | compact mode: draw a 1:1 outline of the resulting window on the real screen while selecting |
 | `hotCorner` | none | topLeft / topRight / bottomLeft / bottomRight |
-| `monitorsJson` | `{}` | per-output grid overrides, JSON map |
+| `monitorsJson` | `{}` | per-output overrides, one `NAME = COLSxROWS[, WxH]` line each (legacy JSON map still accepted); the optional second pair overrides the compact overlay size on that output |
 | `dragAutoTrigger` | false | auto-show picker on any native window drag |
 | `autoAtCursor` | false | auto-trigger picker spawns trailing the cursor's drag direction |
 | `autoExpandOnEdgeDrag` | false | drag a window by the mouse onto a screen edge to snap + fill the free space (grid-overlay drops keep their selected size) |
+| `snapGaps` | false | after a grid/compact placement, close a small leftover gap to an off-grid neighbour |
+| `snapGapMax` | 200 | px cap on how far a `snapGaps` edge may grow |
 | `restoreSizeOnDrag` | false | dragging a placed window out by its titlebar gives it back the size it had before VibeTiles placed it (Windows-style unsnap); forgotten once you resize it by hand |
 
 Both global shortcuts (`Meta+Alt+D` and `Meta+Alt+E`) are owned by KWin and

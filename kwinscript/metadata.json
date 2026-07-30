@@ -9,7 +9,7 @@
         "License": "MIT",
         "Name": "VibeTiles",
         "ServiceTypes": ["KWin/Script"],
-        "Version": "0.3.3"
+        "Version": "0.4.0"
     },
     "X-Plasma-API": "declarativescript",
     "X-Plasma-MainScript": "ui/main.qml",

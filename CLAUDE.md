@@ -261,6 +261,24 @@ Meta+Alt+E (`expandToGap`), both in `Shortcuts.qml`.
   any native resize and co-moves a neighbour already flush against the
   dragged edge; this one only follows a VibeTiles placement and grows the
   placed window itself toward a neighbour that isn't.
+  With `snapGaps` on, it also widens the tolerance the *neighbour* passes
+  use: `coversSpan()` decides whether an overlap counts as a clean edge
+  slice, and its 24px alignment epsilon becomes `snapGapMax` (plus a "≤40%
+  of that dimension" proportional guard, so a genuinely partial overlap is
+  still left alone). That makes an off-grid neighbour overhanging a
+  placement by real pixels shrink (`resizeOverlappingWindows`) or relocate
+  (`relocateCoveredWindows`) instead of sitting half-hidden underneath —
+  previously such a window fell between the two passes, too uncovered to
+  relocate and with a shrink remainder failing its own >50px guard.
+  `commit()` then re-runs the gap-close on the placed window itself, so it
+  absorbs the sliver the retreat just freed. That second growth reads
+  neighbour geometry from `pendingGeoms` (the rects the two passes just
+  wrote), never a read-back: `frameGeometry` still returns the pre-move
+  rect on the same tick, which reads as an obstacle overlapping the placed
+  window, and `expandRectFor` bails outright on an overlapping obstacle —
+  confirmed live as "the drop does nothing, re-dropping on the same cells
+  works". Same class of staleness `presetFg` already guards against for
+  the placed window's own geometry.
 
 - **Restore size on drag** (`restoreSizeOnDrag`) — Windows' "unsnap": `commit()`
   snapshots the window's size just before every placement into `restoreGeoms`

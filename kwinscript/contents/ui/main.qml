@@ -1295,11 +1295,33 @@ PlasmaCore.Dialog {
         return Qt.rect(ix, iy, ix2 - ix, iy2 - iy);
     }
 
+    // How much of a neighbour's edge is allowed to stick out past the placement and still
+    // count as a "fully covered" edge slice. Base is the daemon's 24px alignment epsilon -
+    // enough for rounding and decoration slop between two grid-placed windows, nothing more.
+    // With snapGaps on, that widens to snapGapMax: a neighbour that was resized off-grid by
+    // hand overhangs the placement by real pixels (tens to low hundreds), so the strict test
+    // saw "not an edge slice" and left it sitting half-hidden underneath - the exact case
+    // snapGaps exists to absorb elsewhere. The proportional guard keeps the widened tolerance
+    // from turning a genuinely partial overlap into a slice: the overhang has to be small
+    // relative to the neighbour too, not just small in absolute pixels, so covering a third
+    // of a 300px window is still a partial overlap and left alone.
+    //
+    // Returns true if `span` (the neighbour's extent on an axis) counts as covered by `ovSpan`.
+    function coversSpan(ovSpan, span) {
+        const tol = root.snapGaps ? Math.max(24, root.snapGapMax) : 24;
+        const slack = span - ovSpan;
+        return slack <= tol && slack <= span * 0.4;
+    }
+
     // shrinks any other window whose edge is fully covered by target's new rectangle, so
     // it retreats into the remaining space instead of ending up hidden underneath -
-    // only handles a clean full-width/full-height edge slice, same as the daemon version
-    function resizeOverlappingWindows(target) {
-        const EPS = 24;
+    // only handles a clean full-width/full-height edge slice, same as the daemon version.
+    // Returns the number of neighbours it actually moved, and appends each one's new
+    // geometry to `changedOut` if given (see commit(), which grows the placed window into
+    // the space a shrink just freed and can't trust a read-back for it).
+    function resizeOverlappingWindows(target, changedOut) {
+        const EPS = root.snapGaps ? Math.max(24, root.snapGapMax) : 24;
+        let adjusted = 0;
         // `target` is already the placed window's final geometry, inset by windowGap/2 - so
         // retreating a neighbour to exactly the overlap edge leaves the two frames touching,
         // with no gap at all. Back it off by the full gap instead, which reproduces the
@@ -1313,35 +1335,44 @@ PlasmaCore.Dialog {
             // rest. The call site already has an outer try/catch, but that catches once for
             // the whole loop - this keeps a single dead window from cutting the pass short.
             try {
-                if (ow === root.targetWindow || ow.minimized || !ow.normalWindow) continue;
+                if (ow === root.targetWindow || ow.minimized || !root.isRealWindow(ow)) continue;
                 const c = ow.frameGeometry;
                 const ov = overlapRect(c, target);
                 if (!ov) continue;
                 let nr = null;
-                if (ov.width >= c.width - EPS) {
-                    if (Math.abs(ov.y - c.y) <= EPS) {
+                // Which side of the neighbour the overlap sits against: with the widened
+                // tolerance both ends can be within EPS at once (a small window covered
+                // nearly whole), so pick the end the overlap is actually flush with rather
+                // than letting the first branch win by source order.
+                if (root.coversSpan(ov.width, c.width)) {
+                    const dTop = ov.y - c.y, dBottom = (c.y + c.height) - (ov.y + ov.height);
+                    if (dTop <= dBottom && dTop <= EPS) {
                         const top = ov.y + ov.height + gap;
                         nr = Qt.rect(c.x, top, c.width, (c.y + c.height) - top);
-                    } else if (Math.abs((ov.y + ov.height) - (c.y + c.height)) <= EPS) {
+                    } else if (dBottom <= EPS) {
                         nr = Qt.rect(c.x, c.y, c.width, (ov.y - gap) - c.y);
                     }
                 }
-                if (!nr && ov.height >= c.height - EPS) {
-                    if (Math.abs(ov.x - c.x) <= EPS) {
+                if (!nr && root.coversSpan(ov.height, c.height)) {
+                    const dLeft = ov.x - c.x, dRight = (c.x + c.width) - (ov.x + ov.width);
+                    if (dLeft <= dRight && dLeft <= EPS) {
                         const left = ov.x + ov.width + gap;
                         nr = Qt.rect(left, c.y, (c.x + c.width) - left, c.height);
-                    } else if (Math.abs((ov.x + ov.width) - (c.x + c.width)) <= EPS) {
+                    } else if (dRight <= EPS) {
                         nr = Qt.rect(c.x, c.y, (ov.x - gap) - c.x, c.height);
                     }
                 }
                 if (nr && nr.width > 50 && nr.height > 50) {
                     ow.setMaximize(false, false);
                     ow.frameGeometry = nr;
+                    adjusted++;
+                    if (changedOut) changedOut.push({ win: ow, rect: nr });
                 }
             } catch (e) {
                 continue;
             }
         }
+        return adjusted;
     }
 
     // ---- relocate fully-covered windows (gated on relocateCovered) ----
@@ -1382,6 +1413,24 @@ PlasmaCore.Dialog {
         return true;
     }
 
+    // Geometry a window is *about* to have, overriding what frameGeometry currently reads
+    // back. Set only for the duration of commit()'s post-shrink gap-close (see there): a
+    // neighbour written a moment earlier in the same commit still reads its OLD rect, which
+    // made it look like an obstacle overlapping the placed window - and expandRectFor bails
+    // outright on an overlapping obstacle, so the gap-close silently did nothing. (The
+    // symptom: the placed window took the plain grid size on the drop, then filled the freed
+    // space correctly if you dropped it on the same cells a second time, once the read had
+    // caught up.) An array of {win, rect}, matching hookedWindows/restoreGeoms - window ids
+    // are QUuids and don't work as JS object keys.
+    property var pendingGeoms: null
+
+    function pendingGeomFor(win) {
+        const p = root.pendingGeoms;
+        if (!p) return null;
+        for (let i = 0; i < p.length; i++) if (p[i].win === win) return p[i].rect;
+        return null;
+    }
+
     function occupiedRects(exceptWin) {
         const occupied = [];
         const wins = Workspace.stackingOrder;
@@ -1392,7 +1441,7 @@ PlasmaCore.Dialog {
             // occupying space, so skip it rather than throw the whole occupancy build.
             try {
                 if (ow === exceptWin || !root.isRealWindow(ow)) continue;
-                const c = ow.frameGeometry;
+                const c = root.pendingGeomFor(ow) || ow.frameGeometry;
                 if (!root.overlapRect(c, root.availGeo)) continue;
                 occupied.push(c);
             } catch (e) {
@@ -1508,9 +1557,9 @@ PlasmaCore.Dialog {
         return best;
     }
 
-    function relocateCoveredWindows(target, vacated) {
-        const EPS = 24;
+    function relocateCoveredWindows(target, vacated, changedOut) {
         const others = Workspace.stackingOrder;
+        let moved = 0;
         const covered = [];
         for (let j = 0; j < others.length; j++) {
             const ow = others[j];
@@ -1519,8 +1568,13 @@ PlasmaCore.Dialog {
             const ov = root.overlapRect(c, target);
             if (!ov) continue;
             // fully covered on both axes - a window covered on only one is an edge slice,
-            // which resizeOverlappingWindows already shrinks properly
-            if (ov.width >= c.width - EPS && ov.height >= c.height - EPS) covered.push(ow);
+            // which resizeOverlappingWindows already shrinks properly. Same tolerance as
+            // that pass (coversSpan): an off-grid neighbour overhanging the placement by a
+            // snapGaps-sized sliver on both axes is swallowed for all practical purposes,
+            // and the shrink pass can't help it either - the remainder it computes fails
+            // its own >50px guard, so without this the window just stays hidden underneath.
+            if (root.coversSpan(ov.width, c.width) && root.coversSpan(ov.height, c.height))
+                covered.push(ow);
         }
 
         // The spot the placed window just left is the one region guaranteed to be free,
@@ -1552,13 +1606,17 @@ PlasmaCore.Dialog {
             // but a guessed spot on a full screen would be worse than a predictable no-op.
             if (!spot) continue;
             try {
+                const nr = Qt.rect(Math.round(spot.x), Math.round(spot.y),
+                                   Math.round(spot.width), Math.round(spot.height));
                 covered[j].setMaximize(false, false);
-                covered[j].frameGeometry = Qt.rect(Math.round(spot.x), Math.round(spot.y),
-                                                   Math.round(spot.width), Math.round(spot.height));
+                covered[j].frameGeometry = nr;
+                moved++;
+                if (changedOut) changedOut.push({ win: covered[j], rect: nr });
             } catch (e) {
                 console.warn("vibetiles: covered-window relocate failed:", e);
             }
         }
+        return moved;
     }
 
     function commit(x, y, w, h) {
@@ -1593,19 +1651,54 @@ PlasmaCore.Dialog {
         // relocate before shrink, so the covered-window test sees pre-shrink geometry. The
         // two cases are disjoint (a fully covered window has no edge slice to shrink), but
         // ordering it this way keeps that independence from being load-bearing.
+        let neighboursChanged = 0;
+        const changedGeoms = [];
         if (relocateCovered) {
             try {
-                relocateCoveredWindows(rect, vacated);
+                neighboursChanged += relocateCoveredWindows(rect, vacated, changedGeoms);
             } catch (e) {
                 console.warn("vibetiles: covered-window relocate threw:", e);
             }
         }
         if (resizeOverlapping) {
             try {
-                resizeOverlappingWindows(rect);
+                neighboursChanged += resizeOverlappingWindows(rect, changedGeoms);
             } catch (e) {
                 // a sibling window we tried to make-room for was likely destroyed mid-loop
                 console.warn("vibetiles: overlap-resize threw:", e);
+            }
+        }
+        // Second half of the off-grid-neighbour case: a neighbour that overhung the placement
+        // has just retreated (or moved away entirely), which leaves a fresh sliver of free
+        // space beside the window we placed - the mirror image of the gap snapGaps closes.
+        // finishDrag's own pre-commit gap-close can't see it (it runs against pre-shrink
+        // geometry, before any of this), so close it here, against the settled result.
+        //
+        // This is deliberately the one path that resizes the placed window twice: it only
+        // runs when a neighbour actually moved, which is already a multi-window rearrangement.
+        // Same cap and same screen-edge exclusion as every other snapGaps growth.
+        //
+        // The obstacle scan runs off pendingGeoms - the rects the two passes just WROTE - not
+        // a read-back. A neighbour's frameGeometry still returns its old rect this same tick,
+        // which reads as an obstacle overlapping the placed window, and expandRectFor bails
+        // outright on that: the whole gap-close then silently no-opped on the drop, and only
+        // worked if you re-dropped on the same cells afterwards (confirmed live).
+        if (snapGaps && neighboursChanged > 0) {
+            try {
+                root.pendingGeoms = changedGeoms;
+                const grownSlot = computeGapClosedRect(targetWindow, null, rect);
+                if (grownSlot) {
+                    const gi = windowGap / 2;
+                    targetWindow.frameGeometry = Qt.rect(
+                        Math.round(grownSlot.x + gi), Math.round(grownSlot.y + gi),
+                        Math.round(Math.max(50, grownSlot.width - windowGap)),
+                        Math.round(Math.max(50, grownSlot.height - windowGap)));
+                }
+            } catch (e) {
+                console.warn("vibetiles: post-shrink gap-close threw:", e);
+            } finally {
+                // never leave a stale override behind - every later scan would trust it
+                root.pendingGeoms = null;
             }
         }
         hide();

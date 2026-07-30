@@ -89,14 +89,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="4" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_resizeOverlapping">
         <property name="text">
          <string>Resize overlapping windows to make room</string>
         </property>
        </widget>
       </item>
-      <item row="5" column="0">
+      <item row="5" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_relocateCovered">
         <property name="text">
          <string>Move fully covered windows to the largest free space</string>
@@ -146,14 +146,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="2" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_compactAtCursor">
         <property name="text">
          <string>Spawn compact overlay at mouse cursor</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="3" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_ghostPreview">
         <property name="text">
          <string>Preview the resulting window size on the screen</string>
@@ -217,28 +217,28 @@
       <string>Advanced placement</string>
      </property>
      <layout class="QFormLayout" name="formLayout_advanced">
-      <item row="0" column="0">
+      <item row="0" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_dragAutoTrigger">
         <property name="text">
          <string>Show compact grid when dragging a window</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="1" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_autoAtCursor">
         <property name="text">
          <string>Spawn that picker at the cursor instead of top-center</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="2" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_linkedResize">
         <property name="text">
          <string>Resize neighbouring windows that share the dragged edge</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="3" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_autoExpandOnEdgeDrag">
         <property name="text">
          <string>Fill available space when dropping a window against a screen edge</string>
@@ -248,7 +248,7 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="4" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_snapGaps">
         <property name="text">
          <string>Close small gaps left after placing a window near a neighbour</string>
@@ -275,7 +275,7 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0">
+      <item row="6" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_restoreSizeOnDrag">
         <property name="text">
          <string>Restore a window's previous size when you drag it out of a placement</string>

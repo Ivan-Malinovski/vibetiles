@@ -127,6 +127,7 @@ Configure...**.
 | `dragAutoTrigger` | false | auto-show picker on any native window drag |
 | `autoAtCursor` | false | auto-trigger picker spawns trailing the cursor's drag direction |
 | `autoExpandOnEdgeDrag` | false | drag a window by the mouse onto a screen edge to snap + fill the free space (grid-overlay drops keep their selected size) |
+| `restoreSizeOnDrag` | false | dragging a placed window out by its titlebar gives it back the size it had before VibeTiles placed it (Windows-style unsnap); forgotten once you resize it by hand |
 
 Both global shortcuts (`Meta+Alt+D` and `Meta+Alt+E`) are owned by KWin and
 rebindable from **System Settings → Shortcuts**, same as any other KWin

@@ -192,6 +192,7 @@ Configure..., or `kwriteconfig6`:
 | `autoExpandOnEdgeDrag` | Bool | false | Windows-Snap-style fill-on-edge-drop |
 | `snapGaps` | Bool | false | after a resize or grid/compact placement, close small leftover gaps to a neighbour |
 | `snapGapMax` | Int | 200 | px cap on how far a `snapGaps` edge is allowed to grow |
+| `restoreSizeOnDrag` | Bool | false | give a window its pre-placement size back when it's dragged out by the titlebar |
 
 Two global shortcuts, not kcfg entries: Meta+Alt+D (`showOverlay`) and
 Meta+Alt+E (`expandToGap`), both in `Shortcuts.qml`.
@@ -260,6 +261,21 @@ Meta+Alt+E (`expandToGap`), both in `Shortcuts.qml`.
   any native resize and co-moves a neighbour already flush against the
   dragged edge; this one only follows a VibeTiles placement and grows the
   placed window itself toward a neighbour that isn't.
+
+- **Restore size on drag** (`restoreSizeOnDrag`) — Windows' "unsnap": `commit()`
+  snapshots the window's size just before every placement into `restoreGeoms`
+  (an array keyed by the window object, same pattern as `hookedWindows` —
+  window ids are QUuids and don't work as JS keys), and
+  `onNativeDragStarted` hands it back on a plain titlebar move. Never
+  overwrites an existing entry, so re-tiling an already-placed window still
+  points at the size from before VibeTiles first touched it, not at the
+  intermediate tile. One-shot (the entry is consumed on restore); a hand
+  resize (`win.resize`) drops the entry instead, since the user picking a size
+  supersedes the memory. The restore keeps the top edge and the cursor's
+  *fractional* x within the frame, so the pointer stays on the titlebar as it
+  shrinks — writing `frameGeometry` from inside
+  `interactiveMoveResizeStarted` works because KWin re-derives its own
+  interactive move offset as a fraction on geometry change (confirmed live).
 
 ## Theme awareness
 

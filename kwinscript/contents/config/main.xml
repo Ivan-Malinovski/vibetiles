@@ -123,5 +123,12 @@
             <default>200</default>
         </entry>
 
+        <!-- Windows-Snap style "unsnap": remember a window's size from just before VibeTiles
+             placed it, and give that size back the moment the user starts dragging the
+             window by its titlebar again. See restoreGeoms/restoreSizeFor in main.qml. -->
+        <entry name="restoreSizeOnDrag" type="Bool">
+            <default>false</default>
+        </entry>
+
     </group>
 </kcfg>

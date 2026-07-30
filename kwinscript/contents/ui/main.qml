@@ -94,6 +94,11 @@ PlasmaCore.Dialog {
     // resize are routinely well past a small hardcoded guess (confirmed live - an earlier
     // fixed 48-64px cap was "way too little to make any real difference" for typical gaps).
     property int snapGapMax: 200
+    // when true, the size a window had just before VibeTiles placed it is remembered and
+    // handed back the moment the user starts dragging that window by its titlebar again -
+    // Windows' "drag a snapped window off and it goes back to its old size". Off by default:
+    // it changes what an ordinary titlebar drag does to a placed window. See restoreGeoms.
+    property bool restoreSizeOnDrag: false
     // distance (px) from the physical screen edge within which a native drop counts as an
     // edge-drop. Larger than the overlay path's 10px snap since it gates a whole gesture
     // rather than nudging an already-placed edge, and the cursor rarely lands pixel-exact.
@@ -143,6 +148,7 @@ PlasmaCore.Dialog {
         autoExpandOnEdgeDrag = KWin.readConfig("autoExpandOnEdgeDrag", false);
         snapGaps = KWin.readConfig("snapGaps", false);
         snapGapMax = KWin.readConfig("snapGapMax", 200);
+        restoreSizeOnDrag = KWin.readConfig("restoreSizeOnDrag", false);
         // reading the config string is cheap; re-parsing it (JSON.parse or line-splitting)
         // every activation is the part worth avoiding - only re-parse when it changed.
         const rawMonitors = KWin.readConfig("monitorsJson", "");
@@ -856,9 +862,69 @@ PlasmaCore.Dialog {
         root.linkedNeighbors = [];
     }
 
+    // Pre-placement sizes, one entry per window: {win, w, h}. An array keyed by the window
+    // object itself, same pattern as hookedWindows - window ids are QUuids and don't make
+    // usable JS object keys. Only ever holds windows we've actually placed, so it stays tiny.
+    property var restoreGeoms: []
+
+    function restoreEntryIndex(win) {
+        for (let i = 0; i < root.restoreGeoms.length; i++) {
+            if (root.restoreGeoms[i].win === win) return i;
+        }
+        return -1;
+    }
+
+    // Remember `win`'s current size as what a later titlebar drag should give back. Called
+    // from commit() *before* the placement write. Deliberately does not overwrite an existing
+    // entry: re-tiling an already-placed window (grid, then grid again) must keep pointing at
+    // the size the window had before VibeTiles first touched it, not at the intermediate tile.
+    function rememberSize(win, fg) {
+        if (!root.restoreSizeOnDrag || !win || !fg) return;
+        if (root.restoreEntryIndex(win) >= 0) return;
+        if (fg.width < 50 || fg.height < 50) return;
+        root.restoreGeoms.push({ win: win, w: fg.width, h: fg.height });
+    }
+
+    function forgetSize(win) {
+        const i = root.restoreEntryIndex(win);
+        if (i >= 0) root.restoreGeoms.splice(i, 1);
+    }
+
+    // The "unsnap" itself: give the remembered size back at the start of a titlebar drag,
+    // keeping the window under the cursor. The cursor's horizontal position within the frame
+    // is preserved as a fraction (drag by the middle of a wide titlebar and you keep holding
+    // the middle of the narrow one), while the top edge stays put - the same thing Windows
+    // does, and the only choice that keeps the titlebar under the pointer at all.
+    // One-shot: the entry is consumed here, so a second drag leaves the window alone.
+    function restoreSizeFor(win) {
+        const idx = root.restoreEntryIndex(win);
+        if (idx < 0) return;
+        const e = root.restoreGeoms[idx];
+        root.restoreGeoms.splice(idx, 1);
+        try {
+            const fg = win.frameGeometry;
+            if (Math.abs(fg.width - e.w) < 2 && Math.abs(fg.height - e.h) < 2) return;
+            const c = Workspace.cursorPos;
+            const frac = fg.width > 0
+                ? Math.min(1, Math.max(0, (c.x - fg.x) / fg.width)) : 0.5;
+            win.setMaximize(false, false);
+            win.frameGeometry = Qt.rect(Math.round(c.x - frac * e.w), Math.round(fg.y),
+                                        Math.round(e.w), Math.round(e.h));
+        } catch (err) {
+            // window torn down between the drag starting and this write - nothing to restore
+            console.warn("vibetiles: size restore failed:", err);
+        }
+    }
+
     function onNativeDragStarted(win) {
         root.nativeDragWindow = win;
         root.nativeDragActive = true;
+        // Windows-style unsnap, before anything else reads geometry this drag. A hand resize
+        // is the user picking a size themselves, which supersedes whatever we remembered.
+        if (root.restoreSizeOnDrag && win.normalWindow && !win.fullScreen) {
+            if (win.resize) root.forgetSize(win);
+            else if (win.move) root.restoreSizeFor(win);
+        }
         // win.resize distinguishes an edge/corner drag from a plain move; both fire this
         // same signal. Fullscreen windows have no meaningful neighbours to link.
         if (root.linkedResize && win.normalWindow && win.resize && !win.fullScreen) {
@@ -1060,6 +1126,8 @@ PlasmaCore.Dialog {
                 root.visible = false;
             }
         }
+        // a dead window's remembered size is dead too - drop it whatever drag it was in
+        root.forgetSize(win);
         // forget the window's handlers - its connections die with it, but the entry would
         // otherwise sit in hookedWindows for the rest of the session. Only the bookkeeping
         // is dropped here, not the connections: disconnecting win.closed from inside its
@@ -1511,6 +1579,8 @@ PlasmaCore.Dialog {
         const pg = targetWindow.frameGeometry;
         const vacated = root.overlapRect(pg, root.availGeo)
             ? Qt.rect(pg.x, pg.y, pg.width, pg.height) : null;
+        // same snapshot, different lifetime: what a later titlebar drag gives back
+        root.rememberSize(targetWindow, pg);
         targetWindow.setMaximize(false, false);
         try {
             targetWindow.frameGeometry = rect;

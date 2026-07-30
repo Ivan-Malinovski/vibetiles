@@ -275,6 +275,16 @@
         </property>
        </widget>
       </item>
+      <item row="6" column="0">
+       <widget class="QCheckBox" name="kcfg_restoreSizeOnDrag">
+        <property name="text">
+         <string>Restore a window's previous size when you drag it out of a placement</string>
+        </property>
+        <property name="toolTip">
+         <string>Windows-Snap style "unsnap": the size a window had just before VibeTiles placed it is remembered, and given back as soon as you start dragging that window by its titlebar again - the window stays under the cursor while it shrinks back. Forgotten as soon as you resize the window by hand. Applies to grid, compact-picker and edge-drop placements.</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

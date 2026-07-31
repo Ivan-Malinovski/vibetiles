@@ -1597,29 +1597,40 @@ PlasmaCore.Dialog {
                 covered.push(ow);
         }
 
-        // The spot the placed window just left is the one region guaranteed to be free,
-        // and on a tiled screen it's usually the ONLY one - free-region search comes up
-        // empty precisely when this feature is most wanted (confirmed live: every covered
-        // window logged "spot NONE" on a tiled screen). Claimed by the first covered
-        // window that can use it; a second one has to fall back to the region search.
+        // The spot the placed window just left is the one region guaranteed to be free, and
+        // it's also the one the gesture *means*: dropping A onto B is a swap, so B belongs
+        // where A was, not in whatever unrelated corner happens to be the largest empty
+        // rectangle. So it's tried FIRST, not as a fallback - the free-region search is what
+        // handles the leftovers (a second covered window, or a target dragged in from another
+        // screen, which vacates nothing here). Claimed by the first covered window that can
+        // use it; anyone after that falls back to the region search.
         let swapAvailable = vacated && vacated.width >= 200 && vacated.height >= 150
             && !root.overlapRect(vacated, target);
         for (let j = 0; j < covered.length; j++) {
+            let spot = null;
+            if (swapAvailable) {
+                // The vacated slot is whatever geometry the placed window happened to have,
+                // which for a window that was never tiled is an arbitrary floating rectangle -
+                // handing it to the covered window just moves the untidiness around, and makes
+                // a swap onto an untiled window produce a floating B (reported live). So only
+                // the grid-snapped version counts as a swap here; the raw rect is kept as a
+                // last resort below, after the free-region search has had its turn. The grid
+                // region around a floating window is not necessarily free, hence the test.
+                const snapped = root.snapRectToGrid(vacated);
+                if (!root.overlapRect(snapped, target)
+                        && root.pixelRegionFree(snapped, covered[j])) {
+                    spot = snapped;
+                    swapAvailable = false;  // one window per vacated slot
+                }
+            }
             // recomputed per window, so two windows covered by one placement can't both be
             // sent to the same spot - the first one placed counts as occupied for the next.
-            let spot = root.findFreeRegion(covered[j], target, covered[j]);
+            if (!spot) spot = root.findFreeRegion(covered[j], target, covered[j]);
             if (!spot && swapAvailable) {
-                // The vacated slot is whatever geometry the placed window happened to have,
-                // which for a floating window is an arbitrary rectangle - dropping the
-                // covered window straight into it just moves the untidiness around. Snap it
-                // to the grid so the result looks placed rather than inherited, and keep the
-                // raw rect only if the snapped version would collide with something (the
-                // grid region around a floating window is not necessarily free).
-                const snapped = root.snapRectToGrid(vacated);
-                const usable = !root.overlapRect(snapped, target)
-                    && root.pixelRegionFree(snapped, covered[j]);
-                spot = usable ? snapped : vacated;
-                swapAvailable = false;  // one window per vacated slot
+                // Nothing grid-aligned anywhere and the vacated slot doesn't snap cleanly:
+                // an inherited floating rect still beats leaving the window buried.
+                spot = vacated;
+                swapAvailable = false;
             }
             // nothing free and nothing vacated: leave the window where it is rather than
             // invent a position. It stays hidden underneath, which is the old behaviour,
@@ -1672,24 +1683,37 @@ PlasmaCore.Dialog {
         // two cases are disjoint (a fully covered window has no edge slice to shrink), but
         // ordering it this way keeps that independence from being load-bearing.
         let neighboursChanged = 0;
-        const changedGeoms = [];
-        if (relocateCovered) {
-            try {
-                neighboursChanged += relocateCoveredWindows(rect, vacated, changedGeoms);
-            } catch (e) {
-                console.warn("vibetiles: covered-window relocate threw:", e);
+        // Seeded with the placed window's own new rect, and kept live as pendingGeoms for
+        // every scan below: the whole point of a swap (drop A onto B, B takes A's old spot)
+        // is that the space A just vacated is free, and a frameGeometry read-back on this
+        // tick still puts A there. Without the override findFreeRegion sees A at BOTH ends -
+        // the stale rect over the vacated space plus `placed` over the new one - so the one
+        // region B actually wants is excluded, and B lands in whatever sliver was left over,
+        // half-size or worse (confirmed live, the reported symptom).
+        const changedGeoms = [{ win: targetWindow, rect: rect }];
+        root.pendingGeoms = changedGeoms;
+        try {
+            if (relocateCovered) {
+                try {
+                    neighboursChanged += relocateCoveredWindows(rect, vacated, changedGeoms);
+                } catch (e) {
+                    console.warn("vibetiles: covered-window relocate threw:", e);
+                }
             }
-        }
-        if (resizeOverlapping) {
-            try {
-                // changedGeoms doubles as the skip list - anything relocateCoveredWindows
-                // already moved is off-limits here (see resizeOverlappingWindows).
-                neighboursChanged += resizeOverlappingWindows(rect, changedGeoms,
-                                                             changedGeoms.slice());
-            } catch (e) {
-                // a sibling window we tried to make-room for was likely destroyed mid-loop
-                console.warn("vibetiles: overlap-resize threw:", e);
+            if (resizeOverlapping) {
+                try {
+                    // changedGeoms doubles as the skip list - anything relocateCoveredWindows
+                    // already moved is off-limits here (see resizeOverlappingWindows). The
+                    // seed entry is the target, which that pass skips on its own anyway.
+                    neighboursChanged += resizeOverlappingWindows(rect, changedGeoms,
+                                                                 changedGeoms.slice());
+                } catch (e) {
+                    // a sibling window we tried to make room for was destroyed mid-loop
+                    console.warn("vibetiles: overlap-resize threw:", e);
+                }
             }
+        } finally {
+            root.pendingGeoms = null;
         }
         // Second half of the off-grid-neighbour case: a neighbour that overhung the placement
         // has just retreated (or moved away entirely), which leaves a fresh sliver of free

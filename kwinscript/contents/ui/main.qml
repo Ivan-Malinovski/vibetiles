@@ -51,13 +51,15 @@ PlasmaCore.Dialog {
     // KZones/MouseTiler's automatic drag-triggered zone overlays. Opt-in since it changes
     // the feel of every plain window move, not just shortcut-driven placements.
     property bool dragAutoTrigger: false
-    // When true, the auto-trigger picker spawns with the cursor at the corner facing the
-    // OPPOSITE direction of the drag motion (see dragDirection). Centering would force
+    // When true, the auto-trigger picker spawns hanging down-right from the cursor, held
+    // trailGap clear of it on whichever axis the drag is moving along (see dragDirection
+    // and canvasX/canvasY - it used to trail by the picker's full size, which put the whole
+    // body far from the pointer). Centering would force
     // any selection to include the cursor's spawn cell - making single-cell picks at
     // non-cursor cells impossible, and on a 1x1 picker leaving no room to drag from the
-    // middle at all. With directional corner anchoring, the cursor's first inside-picker
-    // position is at that trailing corner and dragging diagonally extends a selection
-    // away from it - AND the cursor's exit from the picker clears the anchor (see
+    // middle at all. With corner anchoring, the cursor's first inside-picker position is at
+    // the near corner and dragging diagonally extends a selection away from it - AND the
+    // cursor's exit from the picker clears the anchor (see
     // onNativeDragStepped) so a release past the edge doesn't commit a resize the user
     // never confirmed by hovering over a target cell.
     // Independent of compactAtCursor, which only affects non-autoMode compact activations.
@@ -302,18 +304,31 @@ PlasmaCore.Dialog {
     // autoExpandOnEdgeDrag) without the two overlapping/fighting for the same drag. Keep a
     // fixed gap off every edge instead.
     readonly property int edgeMargin: 48
-    // autoAtCursor positions the picker with the cursor at the corner facing OPPOSITE
-    // the drag's motion direction (see dragDirection). If the cursor was moving +X
-    // (rightward), the cursor lands at the picker's right edge - canvasX = cursorX -
-    // canvasWidth. If -X, the cursor lands at the picker's left edge - canvasX =
-    // cursorX. Same for Y, so dragging right-and-down pins the cursor at the
-    // picker's bottom-right, dragging left-and-up pins it at the top-left. The picker
-    // thus trails the cursor's motion, so continued dragging moves the cursor AWAY from
-    // the picker rather than into it.
+    // How far the autoAtCursor picker is held off the cursor on an axis the drag is moving
+    // along. Small and fixed, so the picker always spawns *next to* the pointer.
+    readonly property int trailGap: 48
+    // autoAtCursor spawns the picker hanging down-right from the cursor, nudged trailGap
+    // clear of it on whichever axis the drag is actually moving along (see dragDirection):
+    // moving +X puts the picker's left edge trailGap to the right of the cursor, moving -X
+    // (or not moving on that axis) leaves it flush at the cursor. Same for Y.
+    //
+    // It used to offset by the picker's FULL width/height on a positive-direction axis, so
+    // the cursor sat on the far edge and the whole body trailed behind the motion. That read
+    // as "way too high up" on a first drag (confirmed live): a titlebar pull is usually
+    // downward, so the entire 300px-tall picker landed above the pointer. It also looked
+    // inconsistent, because a cross-screen re-home reuses the first screen's dragDirection
+    // and a monitor-crossing drag is near-horizontal - dy came out 0 or negative there, so
+    // the re-homed picker did spawn at the cursor and the two paths disagreed.
+    //
+    // trailGap is what keeps the pointer OUTSIDE the picker, which still matters: autoAnchored
+    // arms as soon as the cursor is within the canvas (pointInCanvas), so a picker spawned
+    // under the pointer would pin an anchor and commit a placement the user never aimed at.
+    // A gap only on the axis of motion is enough - that's the only direction continued
+    // dragging can carry the cursor in, and it now has to cross trailGap first.
     property real canvasX: root.autoMode
         ? (autoAtCursor
             ? clamp(
-                spawnCursorPos.x - screenGeo.x - (root.dragDirection.x > 0 ? canvasWidth : 0),
+                spawnCursorPos.x - screenGeo.x + (root.dragDirection.x > 0 ? trailGap : 0),
                 availLocalX + edgeMargin,
                 availLocalX + availGeo.width - canvasWidth - edgeMargin
               )
@@ -324,7 +339,7 @@ PlasmaCore.Dialog {
     property real canvasY: root.autoMode
         ? (autoAtCursor
             ? clamp(
-                spawnCursorPos.y - screenGeo.y - (root.dragDirection.y > 0 ? canvasHeight : 0),
+                spawnCursorPos.y - screenGeo.y + (root.dragDirection.y > 0 ? trailGap : 0),
                 availLocalY + edgeMargin,
                 availLocalY + availGeo.height - canvasHeight - edgeMargin
               )
@@ -1040,6 +1055,14 @@ PlasmaCore.Dialog {
             // re-picked on the new screen rather than translated.
             const curScreen = root.currentDragScreen();
             if (curScreen !== root.targetScreenObj) {
+                // Re-spawn at the crossing point, not at the position the picker was
+                // originally summoned from: canvasX/canvasY read spawnCursorPos, which
+                // showAuto captured on the *first* screen, so without this the picker
+                // reappeared at the old screen's cursor height (autoAtCursor) - visually
+                // unrelated to where the cursor actually entered the new screen.
+                // dragDirection is deliberately kept: the drag is still moving the same
+                // way, so the picker should still trail it the same way.
+                root.spawnCursorPos = Workspace.cursorPos;
                 root.rehomeForScreen(curScreen);
                 root.autoAnchored = false;
                 root.dragging = false;

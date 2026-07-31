@@ -214,9 +214,32 @@ Meta+Alt+E (`expandToGap`), both in `Shortcuts.qml`.
   of left hidden underneath. `findFreeRegion()` is pixel-accurate
   (coordinate-compression over obstacle edges in slot space, same
   technique as `expandRectFor`), not grid-quantized — off-grid gaps are
-  measured at their true size. Falls back to the vacated slot
-  (`snapRectToGrid`) if no free region is found; leaves the window in
-  place (old behavior) if neither works.
+  measured at their true size. Spot preference, in order: the **vacated
+  slot** grid-snapped (`snapRectToGrid`) if that rect is free — dropping A
+  onto B is a swap, so B belongs where A was, not in whatever unrelated
+  corner is the largest empty rectangle; then `findFreeRegion()`; then the
+  *raw* vacated rect as a last resort. That last step is deliberately last:
+  for a target that was never tiled the raw rect is an arbitrary floating
+  rectangle, and using it whenever the snapped form collided (the old
+  fallback) made a swap onto an untiled window leave B floating — confirmed
+  live. Leaves the window in place (old behavior) if none of the three
+  works. One window per vacated slot; a second covered window uses the
+  region search.
+  The swap only works because `commit()` sets `pendingGeoms` to the placed
+  window's new rect for the whole neighbour phase: `occupiedRects` reads
+  `frameGeometry`, which on the same tick still reports the target at its
+  *old* position, so it occupied both ends at once (stale rect over the
+  vacated space, `placed` over the new home) and the region the covered
+  window wanted was excluded — it landed in a leftover sliver, half-size or
+  worse (confirmed live). Same staleness the `snapGaps` gap-close guards
+  against, same mechanism.
+  `resizeOverlappingWindows` takes the relocate pass's output as a **skip
+  list** for the same reason: it re-reads `frameGeometry`, so a
+  just-relocated window still reads as overlapping the placement and got
+  shrunk a second time to a rect derived from where it used to be, throwing
+  away the size the relocate gave it. Harmless until `coversSpan`'s epsilon
+  widened to `snapGapMax` — before that the second write failed its own
+  >50px remainder guard.
 - **Linked resize** (`linkedResize`) — dragging a window's edge moves the
   flush edge of every window in its contiguous border chain
   (`collectBorderChain`), like a shared splitter. Neighbours clamp to

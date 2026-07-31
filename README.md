@@ -140,7 +140,7 @@ Configure...**.
 | `hotCorner` | none | topLeft / topRight / bottomLeft / bottomRight |
 | `monitorsJson` | `{}` | per-output overrides, one `NAME = COLSxROWS[, WxH]` line each (legacy JSON map still accepted); the optional second pair overrides the compact overlay size on that output |
 | `dragAutoTrigger` | false | auto-show picker on any native window drag |
-| `autoAtCursor` | false | auto-trigger picker spawns trailing the cursor's drag direction |
+| `autoAtCursor` | false | auto-trigger picker spawns next to the cursor instead of fixed top-center |
 | `autoExpandOnEdgeDrag` | false | drag a window by the mouse onto a screen edge to snap + fill the free space (grid-overlay drops keep their selected size) |
 | `snapGaps` | false | after a grid/compact placement, close a small leftover gap to an off-grid neighbour |
 | `snapGapMax` | 200 | px cap on how far a `snapGaps` edge may grow |

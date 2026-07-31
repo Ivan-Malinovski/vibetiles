@@ -188,7 +188,7 @@ Configure..., or `kwriteconfig6`:
 | `monitorsJson` | String | `{}` | per-output overrides, one `NAME = COLSxROWS[, WxH]` line each (legacy JSON map of name → `{gridCols, gridRows, compactWidth, compactHeight}` still accepted); the optional second pair overrides the compact size on that output |
 | `dragAutoTrigger` | Bool | false | auto-show a top-center picker on any native window drag past a distance threshold |
 | `linkedResize` | Bool | false | co-resize windows sharing the dragged edge |
-| `autoAtCursor` | Bool | false | auto-trigger picker spawns trailing the cursor's drag motion instead of fixed top-center |
+| `autoAtCursor` | Bool | false | auto-trigger picker spawns next to the cursor (48px clear of it on the axis being dragged along) instead of fixed top-center |
 | `autoExpandOnEdgeDrag` | Bool | false | Windows-Snap-style fill-on-edge-drop |
 | `snapGaps` | Bool | false | after a resize or grid/compact placement, close small leftover gaps to a neighbour |
 | `snapGapMax` | Int | 200 | px cap on how far a `snapGaps` edge is allowed to grow |

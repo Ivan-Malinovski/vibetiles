@@ -1319,7 +1319,26 @@ PlasmaCore.Dialog {
     // Returns the number of neighbours it actually moved, and appends each one's new
     // geometry to `changedOut` if given (see commit(), which grows the placed window into
     // the space a shrink just freed and can't trust a read-back for it).
-    function resizeOverlappingWindows(target, changedOut) {
+    // `alreadyMoved`, when given, is the list relocateCoveredWindows just wrote ({win, rect}
+    // entries) - those windows are skipped outright. They must be: this pass re-reads
+    // ow.frameGeometry, which on the same tick still returns the window's PRE-move rect (the
+    // same staleness commit()'s gap-close guards against with pendingGeoms). A relocated
+    // window therefore still reads as overlapping the placement, and gets shrunk a second
+    // time to a rect derived from where it used to be - undoing the size the relocate just
+    // gave it. Harmless until coversSpan's epsilon widened to snapGapMax: before that, a
+    // fully-covered window's shrink remainder failed the >50px guard below, so the second
+    // write never landed. The two cases are meant to be disjoint anyway - a window that was
+    // relocated has no edge slice left to shrink.
+    // Is `win` one of the {win, rect} entries in `list`? Linear scan, same reason as
+    // restoreEntryIndex/hookedWindows: window ids are QUuids and don't key a JS object.
+    function wasMoved(list, win) {
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].win === win) return true;
+        }
+        return false;
+    }
+
+    function resizeOverlappingWindows(target, changedOut, alreadyMoved) {
         const EPS = root.snapGaps ? Math.max(24, root.snapGapMax) : 24;
         let adjusted = 0;
         // `target` is already the placed window's final geometry, inset by windowGap/2 - so
@@ -1336,6 +1355,7 @@ PlasmaCore.Dialog {
             // the whole loop - this keeps a single dead window from cutting the pass short.
             try {
                 if (ow === root.targetWindow || ow.minimized || !root.isRealWindow(ow)) continue;
+                if (alreadyMoved && root.wasMoved(alreadyMoved, ow)) continue;
                 const c = ow.frameGeometry;
                 const ov = overlapRect(c, target);
                 if (!ov) continue;
@@ -1662,7 +1682,10 @@ PlasmaCore.Dialog {
         }
         if (resizeOverlapping) {
             try {
-                neighboursChanged += resizeOverlappingWindows(rect, changedGeoms);
+                // changedGeoms doubles as the skip list - anything relocateCoveredWindows
+                // already moved is off-limits here (see resizeOverlappingWindows).
+                neighboursChanged += resizeOverlappingWindows(rect, changedGeoms,
+                                                             changedGeoms.slice());
             } catch (e) {
                 // a sibling window we tried to make-room for was likely destroyed mid-loop
                 console.warn("vibetiles: overlap-resize threw:", e);

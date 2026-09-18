@@ -13,6 +13,8 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 
 ![VibeTiles demo](https://github.com/Ivan-Malinovski/vibetiles/releases/download/v0.3.2/vibetiles-demo.gif)
 
+**Project status:** I'm currently using Vibetiles as it is, and it works for me, which is why there are not really any updates. If you have feature suggestions, feel free to raise an issue, and I might have a look.
+
 ## Features
 
 - **Three activation modes**

@@ -115,6 +115,12 @@
             <default>false</default>
         </entry>
 
+        <!-- opt-in: when a window closes, the neighbours that exactly fill one of its sides
+             grow into its space. See fillClosedSpace() in main.qml. -->
+        <entry name="fillOnClose" type="Bool">
+            <default>false</default>
+        </entry>
+
         <!-- opt-in: after a grid/compact-picker placement, close any small leftover gap to a
              neighbour (e.g. a neighbour that was itself resized off-grid, so the tiler's usual
              edge-to-edge spacing doesn't hold). Does NOT trigger on a plain native window

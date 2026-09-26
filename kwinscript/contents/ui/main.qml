@@ -90,6 +90,10 @@ PlasmaCore.Dialog {
     // fraction of the target window's width/height, from each side, that counts as that
     // side's split zone. Trellis uses the same 28%; anything inside all four bands swaps.
     readonly property real windowDropBand: 0.28
+    // when true, closing a tiled window hands its space to the neighbours that exactly
+    // fill one of its sides (Trellis' "a split's sibling takes the space"). See
+    // fillClosedSpace().
+    property bool fillOnClose: false
     // when true, a window placed via the grid/compact picker that lands close to but not
     // flush against a neighbour has that gap closed automatically. See computeGapClosedRect(),
     // called from finishDrag(). Deliberately scoped to VibeTiles' own placement commit only -
@@ -157,6 +161,7 @@ PlasmaCore.Dialog {
         linkedResize = KWin.readConfig("linkedResize", false);
         autoExpandOnEdgeDrag = KWin.readConfig("autoExpandOnEdgeDrag", false);
         dropOnWindow = KWin.readConfig("dropOnWindow", false);
+        fillOnClose = KWin.readConfig("fillOnClose", false);
         snapGaps = KWin.readConfig("snapGaps", false);
         snapGapMax = KWin.readConfig("snapGapMax", 200);
         restoreSizeOnDrag = KWin.readConfig("restoreSizeOnDrag", false);
@@ -1228,8 +1233,9 @@ PlasmaCore.Dialog {
         }
         // a dead window's remembered size is dead too - drop it whatever drag it was in
         root.forgetSize(win);
-        // closing a dropped window gives its space back too, like dragging it out
-        root.undoWindowDrop(win);
+        // closing a dropped window gives its space back too, like dragging it out;
+        // otherwise any neighbours that exactly fill one of its sides take its space
+        if (!root.undoWindowDrop(win) && root.fillOnClose) root.fillClosedSpace(win);
         // forget the window's handlers - its connections die with it, but the entry would
         // otherwise sit in hookedWindows for the rest of the session. Only the bookkeeping
         // is dropped here, not the connections: disconnecting win.closed from inside its
@@ -2273,7 +2279,8 @@ PlasmaCore.Dialog {
                 break;
             }
         }
-        if (!rec) return;
+        if (!rec) return false;
+        let restored = false;
         const same = (a, b) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2
             && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2;
         const ignore = [win];
@@ -2289,8 +2296,91 @@ PlasmaCore.Dialog {
                 });
                 if (blocked) continue;
                 e.win.frameGeometry = e.before;
+                restored = true;
             } catch (err) {
                 console.warn("vibetiles: drop undo failed:", err);
+            }
+        }
+        return restored;
+    }
+
+    // The windows sitting flush against `side` of rect g, provided together they cover
+    // that whole side and nothing else pokes past its ends, as [{win, geo}] - or null.
+    // `wins` is a windowDropCandidates() list.
+    function flushNeighbours(g, side, wins) {
+        const tol = root.linkedTol;
+        const axis = (side === "L" || side === "R") ? "x" : "y";
+        const line = root.linkedEdgeCoord(g, side);
+        const facing = { L: "R", R: "L", T: "B", B: "T" }[side];
+        const lo = (axis === "x") ? g.y : g.x;
+        const hi = (axis === "x") ? g.y + g.height : g.x + g.width;
+        const found = [];
+        for (let i = 0; i < wins.length; i++) {
+            const c = wins[i].geo;
+            if (Math.abs(root.linkedEdgeCoord(c, facing) - line) > tol) continue;
+            const s = (axis === "x") ? c.y : c.x;
+            const e = (axis === "x") ? c.y + c.height : c.x + c.width;
+            if (e <= lo + tol || s >= hi - tol) continue;  // alongside some other part
+            if (s < lo - tol || e > hi + tol) return null; // sticks out past g's side
+            found.push({ win: wins[i].win, geo: c, s: s, e: e });
+        }
+        if (found.length === 0) return null;
+        found.sort((a, b) => a.s - b.s);
+        let reach = lo;
+        for (let i = 0; i < found.length; i++) {
+            if (found[i].s > reach + tol) return null;
+            reach = Math.max(reach, found[i].e);
+        }
+        return reach >= hi - tol ? found : null;
+    }
+
+    // Close-time counterpart of a drop: give `win`'s space to whichever side's neighbours
+    // exactly fill that side (fewest windows wins, so a plain two-way split always goes
+    // to the sibling). Each one grows its facing edge to `win`'s far edge. Does nothing if
+    // no side lines up, or if growing would cover some other window.
+    function fillClosedSpace(win) {
+        let g;
+        try {
+            if (win.minimized || win.fullScreen) return;
+            if (!win.onAllDesktops && win.desktops.indexOf(Workspace.currentDesktop) < 0) return;
+            const f = win.frameGeometry;
+            g = Qt.rect(f.x, f.y, f.width, f.height);
+        } catch (e) {
+            return;
+        }
+        if (g.width < 50 || g.height < 50) return;
+        const wins = root.windowDropCandidates(win);
+        let best = null, bestSide = "";
+        const sides = ["L", "R", "T", "B"];
+        for (let i = 0; i < sides.length; i++) {
+            const n = root.flushNeighbours(g, sides[i], wins);
+            if (n && (!best || n.length < best.length)) { best = n; bestSide = sides[i]; }
+        }
+        if (!best) return;
+        const grown = best.map(n => {
+            const c = n.geo;
+            let r;
+            if (bestSide === "L") r = Qt.rect(c.x, c.y, g.x + g.width - c.x, c.height);
+            else if (bestSide === "R") r = Qt.rect(g.x, c.y, c.x + c.width - g.x, c.height);
+            else if (bestSide === "T") r = Qt.rect(c.x, c.y, c.width, g.y + g.height - c.y);
+            else r = Qt.rect(c.x, g.y, c.width, c.y + c.height - g.y);
+            return { win: n.win, rect: r };
+        });
+        const movers = best.map(n => n.win);
+        const others = wins.filter(c => movers.indexOf(c.win) < 0);
+        for (let i = 0; i < grown.length; i++) {
+            const blocked = others.some(c => {
+                const o = root.rectIntersect(c.geo, grown[i].rect);
+                return o.width > root.windowGap && o.height > root.windowGap;
+            });
+            if (blocked) return;
+        }
+        for (let i = 0; i < grown.length; i++) {
+            try {
+                grown[i].win.setMaximize(false, false);
+                grown[i].win.frameGeometry = grown[i].rect;
+            } catch (e) {
+                console.warn("vibetiles: fill on close failed:", e);
             }
         }
     }

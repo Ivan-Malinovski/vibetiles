@@ -259,6 +259,16 @@
        </widget>
       </item>
       <item row="5" column="0" colspan="2">
+       <widget class="QCheckBox" name="kcfg_fillOnClose">
+        <property name="text">
+         <string>Let neighbours take over the space of a window that closes</string>
+        </property>
+        <property name="toolTip">
+         <string>When a window closes, the windows lined up flush against one of its sides, together covering that whole side, grow into the space it leaves. If several sides qualify, the side with the fewest windows wins, so in a plain two-window split the other window simply fills the gap. Nothing happens if growing would cover some other window.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_snapGaps">
         <property name="text">
          <string>Close small gaps left after placing a window near a neighbour</string>
@@ -268,14 +278,14 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0">
+      <item row="7" column="0">
        <widget class="QLabel" name="label_snapGapMax">
         <property name="text">
          <string>Maximum gap to close (px)</string>
         </property>
        </widget>
       </item>
-      <item row="6" column="1">
+      <item row="7" column="1">
        <widget class="QSpinBox" name="kcfg_snapGapMax">
         <property name="minimum">
          <number>0</number>
@@ -285,7 +295,7 @@
         </property>
        </widget>
       </item>
-      <item row="7" column="0" colspan="2">
+      <item row="8" column="0" colspan="2">
        <widget class="QCheckBox" name="kcfg_restoreSizeOnDrag">
         <property name="text">
          <string>Restore a window's previous size when you drag it out of a placement</string>

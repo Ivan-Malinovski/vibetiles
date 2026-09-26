@@ -546,11 +546,11 @@ PlasmaCore.Dialog {
 
     // ---- native drop-onto-window (dropOnWindow, no shortcut) ----
     // windowDropWatch is armed at drag start like edgeDropWatch. windowDrop is the current
-    // {target, zone, slot, rest} while the cursor is over another window (null otherwise);
-    // slot is also mirrored into edgePreviewRect so the same ghost draws the dragged
-    // window's landing spot, and targetGhost draws `rest`. dragOriginGeo is the dragged
-    // window's rect from before the drag (and before any size restore) - where a swap
-    // sends the target.
+    // {zone, slot, rests} while the cursor is over another window (null
+    // otherwise); slot is also mirrored into edgePreviewRect so the same ghost draws the
+    // dragged window's landing spot, and the rests Repeater draws the others. dragOriginGeo
+    // is the dragged window's rect from before the drag (and before any size restore) -
+    // where a swap sends the target.
     property bool windowDropWatch: false
     property var windowDrop: null
     property rect dragOriginGeo: Qt.rect(0, 0, 0, 0)
@@ -957,6 +957,8 @@ PlasmaCore.Dialog {
         root.nativeDragWindow = win;
         root.nativeDragActive = true;
         root.dragOriginGeo = win.frameGeometry;
+        // dragging a dropped window back out gives the windows it split their space back
+        if (win.move) root.undoWindowDrop(win);
         // Windows-style unsnap, before anything else reads geometry this drag. A hand resize
         // is the user picking a size themselves, which supersedes whatever we remembered.
         if (root.restoreSizeOnDrag && win.normalWindow && !win.fullScreen) {
@@ -1226,6 +1228,8 @@ PlasmaCore.Dialog {
         }
         // a dead window's remembered size is dead too - drop it whatever drag it was in
         root.forgetSize(win);
+        // closing a dropped window gives its space back too, like dragging it out
+        root.undoWindowDrop(win);
         // forget the window's handlers - its connections die with it, but the entry would
         // otherwise sit in hookedWindows for the rest of the session. Only the bookkeeping
         // is dropped here, not the connections: disconnecting win.closed from inside its
@@ -2114,43 +2118,34 @@ PlasmaCore.Dialog {
         return fractionRect;
     }
 
-    // Drop-onto-window target for a native drag of `win`: the topmost other real window
-    // under the cursor, and what the drop would do to it. Returns null when there's nothing
-    // to drop onto, else {target, zone, slot, rest} - slot is where `win` lands, rest is
-    // what the target keeps, both pre-gap-inset like everything commit() takes.
+    // Drop-onto-window target for a native drag of `win`. Returns null when there's nothing
+    // to drop onto, else {zone, slot, rests} - slot is where `win` lands, rests is
+    // [{win, rect}] for every other window the drop moves, all pre-gap-inset like
+    // everything commit() takes.
+    // The target is the topmost other window under the cursor.
     //
-    // The split works on the target's rect grown back out by windowGap/2 (clipped to the
-    // work area), i.e. the tile it was placed into, so both halves come out with the same
-    // gap spacing as a grid placement.
+    // Splits work on each window's rect grown back out by windowGap/2 (clipped to the
+    // work area), i.e. the tile it was placed into, so the results keep the same gap
+    // spacing as a grid placement.
     function windowDropTarget(win) {
         if (!win || !root.isRealWindow(win)) return null;
         const p = Workspace.cursorPos;
-        const wins = Workspace.stackingOrder;
-        let target = null, tg = null;
-        // stackingOrder is bottom-to-top, so walk it backwards for the topmost hit
-        for (let i = wins.length - 1; i >= 0; i--) {
-            const ow = wins[i];
-            try {
-                if (ow === win || !root.isRealWindow(ow) || ow.fullScreen) continue;
-                if (!ow.onAllDesktops && ow.desktops.indexOf(Workspace.currentDesktop) < 0) continue;
-                const g = ow.frameGeometry;
-                if (p.x >= g.x && p.x < g.x + g.width && p.y >= g.y && p.y < g.y + g.height) {
-                    target = ow;
-                    tg = Qt.rect(g.x, g.y, g.width, g.height);
-                    break;
-                }
-            } catch (e) {
-                continue;
-            }
-        }
-        if (!target) return null;
         const screen = root.screenAt(p);
         if (!screen) return null;
         root.rehomeForScreen(screen);
-        const half = root.windowGap / 2;
-        const outer = root.rectIntersect(
-            Qt.rect(tg.x - half, tg.y - half, tg.width + root.windowGap, tg.height + root.windowGap),
-            root.availGeo);
+        const cands = root.windowDropCandidates(win);
+        // cands is topmost-first, so the first hit is the window actually under the cursor
+        let target = null;
+        for (let i = 0; i < cands.length; i++) {
+            const g = cands[i].geo;
+            if (p.x >= g.x && p.x < g.x + g.width && p.y >= g.y && p.y < g.y + g.height) {
+                target = cands[i];
+                break;
+            }
+        }
+        if (!target) return null;
+        const tg = target.geo;
+        const outer = root.dropOuterRect(tg);
         if (outer.width < 100 || outer.height < 100) return null;
         const fx = (p.x - tg.x) / tg.width, fy = (p.y - tg.y) / tg.height;
         const dists = [["left", fx], ["right", 1 - fx], ["top", fy], ["bottom", 1 - fy]];
@@ -2161,9 +2156,11 @@ PlasmaCore.Dialog {
         if (zone === "center") {
             const o = root.dragOriginGeo;
             if (o.width < 50 || o.height < 50) return null;
-            return { target: target, zone: zone, slot: outer,
-                     rest: Qt.rect(o.x - half, o.y - half, o.width + root.windowGap,
-                                   o.height + root.windowGap) };
+            const half = root.windowGap / 2;
+            return { zone: zone, slot: outer,
+                     rests: [{ win: target.win,
+                               rect: Qt.rect(o.x - half, o.y - half, o.width + root.windowGap,
+                                             o.height + root.windowGap) }] };
         }
         const hw = Math.round(outer.width / 2), hh = Math.round(outer.height / 2);
         let slot, rest;
@@ -2180,7 +2177,35 @@ PlasmaCore.Dialog {
             rest = Qt.rect(outer.x, outer.y, outer.width, hh);
             slot = Qt.rect(outer.x, outer.y + hh, outer.width, outer.height - hh);
         }
-        return { target: target, zone: zone, slot: slot, rest: rest };
+        return { zone: zone, slot: slot, rests: [{ win: target.win, rect: rest }] };
+    }
+
+    // Other real windows on the current desktop that a drop of `win` could land on,
+    // topmost first, as [{win, geo}].
+    function windowDropCandidates(win) {
+        const out = [];
+        const wins = Workspace.stackingOrder;
+        // stackingOrder is bottom-to-top
+        for (let i = wins.length - 1; i >= 0; i--) {
+            const ow = wins[i];
+            try {
+                if (ow === win || !root.isRealWindow(ow) || ow.fullScreen) continue;
+                if (!ow.onAllDesktops && ow.desktops.indexOf(Workspace.currentDesktop) < 0) continue;
+                const g = ow.frameGeometry;
+                out.push({ win: ow, geo: Qt.rect(g.x, g.y, g.width, g.height) });
+            } catch (e) {
+                continue;
+            }
+        }
+        return out;
+    }
+
+    // a window's rect grown back out to its tile (see windowDropTarget)
+    function dropOuterRect(g) {
+        const half = root.windowGap / 2;
+        return root.rectIntersect(
+            Qt.rect(g.x - half, g.y - half, g.width + root.windowGap, g.height + root.windowGap),
+            root.availGeo);
     }
 
     // gap-inset final geometry for a pre-inset rect, same math as commit()
@@ -2192,20 +2217,81 @@ PlasmaCore.Dialog {
     }
 
     // Apply a windowDropTarget() result. Deliberately not routed through commit(): the drop
-    // already decides both windows' geometry, so the overlap-resize/relocate passes there
+    // already decides every window's geometry, so the overlap-resize/relocate passes there
     // would only second-guess it.
+    //
+    // Split drops leave an undo record (see dropUndo) so the windows that made
+    // room get their space back when `win` leaves again. A swap doesn't - nothing shrank.
     function commitWindowDrop(win, drop) {
+        const affected = [];
         try {
             root.rememberSize(win, win.frameGeometry);
-            root.rememberSize(drop.target, drop.target.frameGeometry);
-            drop.target.setMaximize(false, false);
-            drop.target.frameGeometry = root.gapInset(drop.rest);
+            for (let i = 0; i < drop.rests.length; i++) {
+                const r = drop.rests[i];
+                const before = r.win.frameGeometry;
+                const after = root.gapInset(r.rect);
+                root.rememberSize(r.win, before);
+                r.win.setMaximize(false, false);
+                r.win.frameGeometry = after;
+                affected.push({ win: r.win, before: Qt.rect(before.x, before.y, before.width,
+                                                             before.height),
+                                after: after });
+            }
             win.setMaximize(false, false);
             win.frameGeometry = root.gapInset(drop.slot);
             Workspace.activeWindow = win;
         } catch (e) {
             // either window can die between the release and these writes
             console.warn("vibetiles: window drop failed:", e);
+        }
+        root.forgetDropUndo(win);
+        if (drop.zone !== "center" && affected.length > 0)
+            root.dropUndo.push({ dropped: win, affected: affected });
+    }
+
+    // Undo records for split drops: [{dropped, affected: [{win, before, after}]}],
+    // keyed by window object like restoreGeoms. When `dropped` is dragged out again (or
+    // closes), undoWindowDrop() gives each affected window its `before` rect back.
+    property var dropUndo: []
+
+    function forgetDropUndo(win) {
+        for (let i = root.dropUndo.length - 1; i >= 0; i--) {
+            if (root.dropUndo[i].dropped === win) root.dropUndo.splice(i, 1);
+        }
+    }
+
+    // Consumes `win`'s undo record. A window only gets its old rect back if it still has
+    // exactly the rect the drop gave it (anything else means it's been moved or resized
+    // since, and the user's arrangement wins), and if growing back wouldn't cover some
+    // other window that has since moved into that space.
+    function undoWindowDrop(win) {
+        let rec = null;
+        for (let i = 0; i < root.dropUndo.length; i++) {
+            if (root.dropUndo[i].dropped === win) {
+                rec = root.dropUndo[i];
+                root.dropUndo.splice(i, 1);
+                break;
+            }
+        }
+        if (!rec) return;
+        const same = (a, b) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2
+            && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2;
+        const ignore = [win];
+        for (let i = 0; i < rec.affected.length; i++) ignore.push(rec.affected[i].win);
+        const others = root.windowDropCandidates(null).filter(c => ignore.indexOf(c.win) < 0);
+        for (let i = 0; i < rec.affected.length; i++) {
+            const e = rec.affected[i];
+            try {
+                if (!root.isRealWindow(e.win) || !same(e.win.frameGeometry, e.after)) continue;
+                const blocked = others.some(c => {
+                    const o = root.rectIntersect(c.geo, e.before);
+                    return o.width > root.windowGap && o.height > root.windowGap;
+                });
+                if (blocked) continue;
+                e.win.frameGeometry = e.before;
+            } catch (err) {
+                console.warn("vibetiles: drop undo failed:", err);
+            }
         }
     }
 
@@ -2343,35 +2429,24 @@ PlasmaCore.Dialog {
     // top-left (i.e., screen origin minus screenGeo.{x,y}). So we snap in screen coords
     // and convert to mainItem-local by subtracting screenGeo.x (= availGeo.x - availLocalX).
     // With windowGap/2 baked in so commit()'s inset geometry matches the outline exactly.
-    // Drop-onto-window: where the window under the cursor ends up (windowDrop.rest), drawn
+    // Drop-onto-window: where each window the drop moves ends up (windowDrop.rests), drawn
     // next to the main ghost, which shows the dragged window's slot. Fainter than the ghost
     // so it's clear which one is the window being dropped. Same screen-to-mainItem
     // conversion and gap inset as the ghost's edge-drop branch.
-    Rectangle {
-        id: targetGhost
-        readonly property var drop: root.windowDrop
-        // hold the last rect and only animate once shown, same as the ghost's held/settled -
-        // otherwise it slides in from (0,0) when it first appears
-        property rect held: Qt.rect(0, 0, 0, 0)
-        property bool settled: false
-        onDropChanged: {
-            if (drop) held = drop.rest;
-            if (!drop) settled = false;
-            else if (!settled) Qt.callLater(() => targetGhost.settled = targetGhost.drop !== null);
+    Repeater {
+        model: root.windowDrop ? root.windowDrop.rests : []
+        delegate: Rectangle {
+            required property var modelData
+            readonly property rect r: modelData.rect
+            x: r.x - root.availGeo.x + root.availLocalX + root.windowGap / 2
+            y: r.y - root.availGeo.y + root.availLocalY + root.windowGap / 2
+            width: Math.max(0, r.width - root.windowGap)
+            height: Math.max(0, r.height - root.windowGap)
+            color: root.themeAlpha(Kirigami.Theme.backgroundColor, 0.35)
+            border.color: root.themeAlpha(Kirigami.Theme.textColor, 0.5)
+            border.width: 2
+            radius: 4
         }
-        visible: drop !== null
-        x: held.x - root.availGeo.x + root.availLocalX + root.windowGap / 2
-        y: held.y - root.availGeo.y + root.availLocalY + root.windowGap / 2
-        width: Math.max(0, held.width - root.windowGap)
-        height: Math.max(0, held.height - root.windowGap)
-        color: root.themeAlpha(Kirigami.Theme.backgroundColor, 0.35)
-        border.color: root.themeAlpha(Kirigami.Theme.textColor, 0.5)
-        border.width: 2
-        radius: 4
-        Behavior on x { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-        Behavior on y { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-        Behavior on width { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-        Behavior on height { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
     }
 
     Rectangle {

@@ -109,7 +109,7 @@
 
         <!-- opt-in: drop a dragged window onto another window to split it (Trellis-style
              docking). The outer 28% on a side of the window under the cursor splits it in
-             half toward that side; the middle swaps the two windows. Screen-edge drop wins
+             half toward that side; the middle swaps the two windows. Dragging the dropped window back out undoes the split. Screen-edge drop wins
              over this at the edge. See windowDropTarget() in main.qml. -->
         <entry name="dropOnWindow" type="Bool">
             <default>false</default>

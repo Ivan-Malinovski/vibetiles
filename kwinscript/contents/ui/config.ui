@@ -254,7 +254,7 @@
          <string>Split a window by dropping another window onto it</string>
         </property>
         <property name="toolTip">
-         <string>Drag a window by its titlebar over another window. Near one of its sides (the outer 28%), the window underneath shrinks to the opposite half and the dragged window takes the half on that side. In the middle, the two windows swap places. A preview shows both results before you let go. A screen-edge drop wins at the screen edge, and while the cursor is over another window this takes precedence over the drag picker.</string>
+         <string>Drag a window by its titlebar over another window. Near one of its sides (the outer 28%), the window underneath shrinks to the opposite half and the dragged window takes the half on that side. In the middle, the two windows swap places. Dragging the dropped window out again, or closing it, gives the other windows their size back. A preview shows both results before you let go. A screen-edge drop wins at the screen edge, and while the cursor is over another window this takes precedence over the drag picker.</string>
         </property>
        </widget>
       </item>

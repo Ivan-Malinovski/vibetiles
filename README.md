@@ -62,7 +62,9 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 - **Drop onto a window** (opt-in) — Trellis-style docking: drag a window over
   another one and drop it near one of its sides (the outer 28%) to split that window
   in half, with the dropped window taking the half on that side. Drop in the middle
-  to swap the two. A live preview outlines both windows' new spots.
+  to swap the two. A live preview outlines every window's new spot.
+  Dragging the dropped window out again (or closing it) gives the windows it split
+  their space back, unless they've been moved or resized since.
 - **Restore size on drag** (opt-in) — Windows-style unsnap: the size a window
   had *before* VibeTiles placed it is remembered, and handed back the moment you
   drag that window out by its titlebar, with the window staying under your
@@ -94,6 +96,7 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 | Drag a window onto a screen edge (with edge-drop on) | snaps + fills the reachable free space (or that half of the screen) |
 | Drag a window onto another window's side (with drop-onto-window on) | that window gives up the half on that side to the dragged one |
 | Drag a window onto the middle of another (with drop-onto-window on) | the two windows swap places |
+| Drag a dropped window back out (with drop-onto-window on) | the windows it split get their size back |
 | Drag a window into a screen corner (with edge-drop on) | same, clipped to that quarter of the screen |
 
 Cancel is right-click rather than `Escape` deliberately: script-owned overlay

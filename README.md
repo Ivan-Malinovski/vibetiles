@@ -56,6 +56,8 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
   grid), without moving it.
 - **Fill on close** (opt-in) — when a window closes, the neighbours lined up
   against one of its sides grow into the space it leaves.
+- **Fill on minimize** (opt-in) — the same when a window is minimized;
+  restoring it shrinks the neighbours back.
 - **Edge-drop snap** (opt-in) — Windows-Snap-style: drop a window against a
   screen edge and it fills the reachable free space next to it (or takes that
   half of the screen when nothing else is there), with a live shadowed preview.
@@ -157,6 +159,7 @@ Configure...**.
 | `autoExpandOnEdgeDrag` | false | drag a window by the mouse onto a screen edge to snap + fill the free space (grid-overlay drops keep their selected size) |
 | `dropOnWindow` | false | drop a dragged window near a side of another window to split it, or in its middle to swap them |
 | `fillOnClose` | false | when a window closes, the neighbours that fill one of its sides take its space |
+| `fillOnMinimize` | false | same when a window is minimized; restoring it shrinks the neighbours back |
 | `snapGaps` | false | after a grid/compact placement, close a small leftover gap to an off-grid neighbour |
 | `snapGapMax` | 200 | px cap on how far a `snapGaps` edge may grow |
 | `restoreSizeOnDrag` | false | dragging a placed window out by its titlebar gives it back the size it had before VibeTiles placed it (Windows-style unsnap); forgotten once you resize it by hand |

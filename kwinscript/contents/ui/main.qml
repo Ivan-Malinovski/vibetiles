@@ -94,6 +94,11 @@ PlasmaCore.Dialog {
     // fill one of its sides (Trellis' "a split's sibling takes the space"). See
     // fillClosedSpace().
     property bool fillOnClose: false
+    // when true, minimizing a tiled window does the same, and un-minimizing it shrinks the
+    // neighbours back (if they haven't been moved since). See onWindowMinimizedChanged().
+    property bool fillOnMinimize: false
+    // [{win, fills: [{win, from, to}]}] - neighbours grown over a minimized window
+    property var minimizeFills: []
     // when true, a window placed via the grid/compact picker that lands close to but not
     // flush against a neighbour has that gap closed automatically. See computeGapClosedRect(),
     // called from finishDrag(). Deliberately scoped to VibeTiles' own placement commit only -
@@ -162,6 +167,7 @@ PlasmaCore.Dialog {
         autoExpandOnEdgeDrag = KWin.readConfig("autoExpandOnEdgeDrag", false);
         dropOnWindow = KWin.readConfig("dropOnWindow", false);
         fillOnClose = KWin.readConfig("fillOnClose", false);
+        fillOnMinimize = KWin.readConfig("fillOnMinimize", false);
         snapGaps = KWin.readConfig("snapGaps", false);
         snapGapMax = KWin.readConfig("snapGapMax", 200);
         restoreSizeOnDrag = KWin.readConfig("restoreSizeOnDrag", false);
@@ -1235,7 +1241,8 @@ PlasmaCore.Dialog {
         root.forgetSize(win);
         // closing a dropped window gives its space back too, like dragging it out;
         // otherwise any neighbours that exactly fill one of its sides take its space
-        if (!root.undoWindowDrop(win) && root.fillOnClose) root.fillClosedSpace(win);
+        if (!root.undoWindowDrop(win) && root.fillOnClose) root.fillClosedSpace(win, false);
+        root.forgetMinimizeFill(win);
         // forget the window's handlers - its connections die with it, but the entry would
         // otherwise sit in hookedWindows for the rest of the session. Only the bookkeeping
         // is dropped here, not the connections: disconnecting win.closed from inside its
@@ -1269,13 +1276,15 @@ PlasmaCore.Dialog {
             started: () => root.onNativeDragStarted(win),
             stepped: (rect) => root.onNativeDragStepped(win, rect),
             finished: () => root.onNativeDragFinished(win),
-            closed: () => root.onNativeDragWindowClosed(win)
+            closed: () => root.onNativeDragWindowClosed(win),
+            minimized: () => root.onWindowMinimizedChanged(win)
         };
         root.hookedWindows.push(h);
         win.interactiveMoveResizeStarted.connect(h.started);
         win.interactiveMoveResizeStepped.connect(h.stepped);
         win.interactiveMoveResizeFinished.connect(h.finished);
         win.closed.connect(h.closed);
+        win.minimizedChanged.connect(h.minimized);
     }
 
     function unhookWindow(win) {
@@ -1288,6 +1297,7 @@ PlasmaCore.Dialog {
                 win.interactiveMoveResizeStepped.disconnect(h.stepped);
                 win.interactiveMoveResizeFinished.disconnect(h.finished);
                 win.closed.disconnect(h.closed);
+                win.minimizedChanged.disconnect(h.minimized);
             } catch (e) {
                 // window already torn down - the connections went with it
             }
@@ -2337,18 +2347,19 @@ PlasmaCore.Dialog {
     // Close-time counterpart of a drop: give `win`'s space to whichever side's neighbours
     // exactly fill that side (fewest windows wins, so a plain two-way split always goes
     // to the sibling). Each one grows its facing edge to `win`'s far edge. Does nothing if
-    // no side lines up, or if growing would cover some other window.
-    function fillClosedSpace(win) {
+    // no side lines up, or if growing would cover some other window. Returns the grown
+    // windows as [{win, from, to}], or null. `minimizing`: win is already minimized.
+    function fillClosedSpace(win, minimizing) {
         let g;
         try {
-            if (win.minimized || win.fullScreen) return;
-            if (!win.onAllDesktops && win.desktops.indexOf(Workspace.currentDesktop) < 0) return;
+            if ((win.minimized && !minimizing) || win.fullScreen) return null;
+            if (!win.onAllDesktops && win.desktops.indexOf(Workspace.currentDesktop) < 0) return null;
             const f = win.frameGeometry;
             g = Qt.rect(f.x, f.y, f.width, f.height);
         } catch (e) {
-            return;
+            return null;
         }
-        if (g.width < 50 || g.height < 50) return;
+        if (g.width < 50 || g.height < 50) return null;
         const wins = root.windowDropCandidates(win);
         let best = null, bestSide = "";
         const sides = ["L", "R", "T", "B"];
@@ -2356,7 +2367,7 @@ PlasmaCore.Dialog {
             const n = root.flushNeighbours(g, sides[i], wins);
             if (n && (!best || n.length < best.length)) { best = n; bestSide = sides[i]; }
         }
-        if (!best) return;
+        if (!best) return null;
         const grown = best.map(n => {
             const c = n.geo;
             let r;
@@ -2373,16 +2384,52 @@ PlasmaCore.Dialog {
                 const o = root.rectIntersect(c.geo, grown[i].rect);
                 return o.width > root.windowGap && o.height > root.windowGap;
             });
-            if (blocked) return;
+            if (blocked) return null;
         }
+        const done = [];
         for (let i = 0; i < grown.length; i++) {
             try {
                 grown[i].win.setMaximize(false, false);
                 grown[i].win.frameGeometry = grown[i].rect;
+                done.push({ win: grown[i].win, from: best[i].geo, to: grown[i].rect });
             } catch (e) {
                 console.warn("vibetiles: fill on close failed:", e);
             }
         }
+        return done.length ? done : null;
+    }
+
+    function onWindowMinimizedChanged(win) {
+        if (win.minimized) {
+            if (!root.fillOnMinimize) return;
+            root.forgetMinimizeFill(win);
+            const fills = root.fillClosedSpace(win, true);
+            if (fills) root.minimizeFills.push({ win: win, fills: fills });
+            return;
+        }
+        const entry = root.forgetMinimizeFill(win);
+        if (!entry) return;
+        // only shrink neighbours still exactly where the fill put them - one the user
+        // has since moved or resized is theirs now
+        const near = (a, b) => Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2
+            && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2;
+        for (let i = 0; i < entry.fills.length; i++) {
+            const f = entry.fills[i];
+            try {
+                if (f.win.minimized || !near(f.win.frameGeometry, f.to)) continue;
+                f.win.frameGeometry = f.from;
+            } catch (e) {
+                // neighbour closed meanwhile
+            }
+        }
+    }
+
+    // Drop win's minimize-fill record (as the minimized window) and return it, or null.
+    function forgetMinimizeFill(win) {
+        for (let i = 0; i < root.minimizeFills.length; i++) {
+            if (root.minimizeFills[i].win === win) return root.minimizeFills.splice(i, 1)[0];
+        }
+        return null;
     }
 
     function finishDrag() {

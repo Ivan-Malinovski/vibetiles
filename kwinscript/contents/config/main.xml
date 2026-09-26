@@ -121,6 +121,12 @@
             <default>false</default>
         </entry>
 
+        <!-- opt-in: same as fillOnClose when a window is minimized; restoring it shrinks the
+             neighbours back. See onWindowMinimizedChanged() in main.qml. -->
+        <entry name="fillOnMinimize" type="Bool">
+            <default>false</default>
+        </entry>
+
         <!-- opt-in: after a grid/compact-picker placement, close any small leftover gap to a
              neighbour (e.g. a neighbour that was itself resized off-grid, so the tiler's usual
              edge-to-edge spacing doesn't hold). Does NOT trigger on a plain native window

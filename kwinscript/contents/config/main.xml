@@ -107,6 +107,14 @@
             <default>false</default>
         </entry>
 
+        <!-- opt-in: drop a dragged window onto another window to split it (Trellis-style
+             docking). The outer 28% on a side of the window under the cursor splits it in
+             half toward that side; the middle swaps the two windows. Screen-edge drop wins
+             over this at the edge. See windowDropTarget() in main.qml. -->
+        <entry name="dropOnWindow" type="Bool">
+            <default>false</default>
+        </entry>
+
         <!-- opt-in: after a grid/compact-picker placement, close any small leftover gap to a
              neighbour (e.g. a neighbour that was itself resized off-grid, so the tiler's usual
              edge-to-edge spacing doesn't hold). Does NOT trigger on a plain native window

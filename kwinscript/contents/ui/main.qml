@@ -82,6 +82,14 @@ PlasmaCore.Dialog {
     // snap so the two don't both fire on the same edge. dragAutoTrigger takes precedence (its
     // picker owns the drag) - the two aren't armed on the same drag.
     property bool autoExpandOnEdgeDrag: false
+    // when true, a plain native window drag dropped onto another window docks into it,
+    // Trellis-style: the outer windowDropBand of a side splits the window underneath in half
+    // with the dragged window taking the half on that side, the middle swaps the two. A
+    // screen-edge drop still wins at the screen edge. See windowDropTarget().
+    property bool dropOnWindow: false
+    // fraction of the target window's width/height, from each side, that counts as that
+    // side's split zone. Trellis uses the same 28%; anything inside all four bands swaps.
+    readonly property real windowDropBand: 0.28
     // when true, a window placed via the grid/compact picker that lands close to but not
     // flush against a neighbour has that gap closed automatically. See computeGapClosedRect(),
     // called from finishDrag(). Deliberately scoped to VibeTiles' own placement commit only -
@@ -148,6 +156,7 @@ PlasmaCore.Dialog {
         autoAtCursor = KWin.readConfig("autoAtCursor", false);
         linkedResize = KWin.readConfig("linkedResize", false);
         autoExpandOnEdgeDrag = KWin.readConfig("autoExpandOnEdgeDrag", false);
+        dropOnWindow = KWin.readConfig("dropOnWindow", false);
         snapGaps = KWin.readConfig("snapGaps", false);
         snapGapMax = KWin.readConfig("snapGapMax", 200);
         restoreSizeOnDrag = KWin.readConfig("restoreSizeOnDrag", false);
@@ -495,6 +504,8 @@ PlasmaCore.Dialog {
         root.edgePreview = false;
         root.edgeDropWatch = false;
         root.edgePreviewRect = Qt.rect(0, 0, 0, 0);
+        root.windowDropWatch = false;
+        root.windowDrop = null;
         root.dragDirection = Qt.point(0, 0);
         // drop the compact-picker window list so a later show() can't briefly display a
         // stale set (a window could have closed while the overlay was hidden); the next
@@ -532,6 +543,17 @@ PlasmaCore.Dialog {
     property bool edgeDropWatch: false
     property bool edgePreview: false
     property rect edgePreviewRect: Qt.rect(0, 0, 0, 0)
+
+    // ---- native drop-onto-window (dropOnWindow, no shortcut) ----
+    // windowDropWatch is armed at drag start like edgeDropWatch. windowDrop is the current
+    // {target, zone, slot, rest} while the cursor is over another window (null otherwise);
+    // slot is also mirrored into edgePreviewRect so the same ghost draws the dragged
+    // window's landing spot, and targetGhost draws `rest`. dragOriginGeo is the dragged
+    // window's rect from before the drag (and before any size restore) - where a swap
+    // sends the target.
+    property bool windowDropWatch: false
+    property var windowDrop: null
+    property rect dragOriginGeo: Qt.rect(0, 0, 0, 0)
 
     // canvas-local point matching Workspace.cursorPos, the same frame dragStart/dragCurrent
     // live in - used to seed and update the selection during a drag-triggered activation,
@@ -934,6 +956,7 @@ PlasmaCore.Dialog {
     function onNativeDragStarted(win) {
         root.nativeDragWindow = win;
         root.nativeDragActive = true;
+        root.dragOriginGeo = win.frameGeometry;
         // Windows-style unsnap, before anything else reads geometry this drag. A hand resize
         // is the user picking a size themselves, which supersedes whatever we remembered.
         if (root.restoreSizeOnDrag && win.normalWindow && !win.fullScreen) {
@@ -964,6 +987,10 @@ PlasmaCore.Dialog {
                 && win.normalWindow && win.move && !win.fullScreen) {
             root.edgeDropWatch = true;
         }
+        // Drop-onto-window watch - same gating as the edge-drop watch above.
+        root.windowDrop = null;
+        root.windowDropWatch = root.dropOnWindow && !root.visible
+            && win.normalWindow && win.move && !win.fullScreen;
     }
 
     function onNativeDragStepped(win, rect) {
@@ -1012,6 +1039,7 @@ PlasmaCore.Dialog {
                     root.dragging = false;
                 }
                 root.autoDragPending = false;
+                root.windowDrop = null;
                 root.edgePreviewRect = target;
                 if (!root.edgePreview) {
                     root.edgePreview = true;
@@ -1026,6 +1054,39 @@ PlasmaCore.Dialog {
                 // logic. Re-arm the picker trigger (if enabled) from here so continued inward
                 // motion can re-open it.
                 root.edgePreview = false;
+                root.visible = false;
+                if (root.dragAutoTrigger) {
+                    root.autoDragPending = true;
+                    root.autoDragStartPos = Workspace.cursorPos;
+                }
+            }
+        }
+        // Drop-onto-window: next in line after the screen edge. While the cursor is over
+        // another window this owns the drag and the picker stays down, except when the
+        // picker is already up and the cursor is inside it - then the picker keeps it.
+        if (root.windowDropWatch) {
+            const pickerOwns = root.visible && root.autoMode
+                && root.pointInCanvas(root.externalCanvasPoint());
+            const drop = pickerOwns ? null : root.windowDropTarget(win);
+            if (drop) {
+                if (root.autoMode) {
+                    root.autoMode = false;
+                    root.autoAnchored = false;
+                    root.dragging = false;
+                }
+                root.autoDragPending = false;
+                root.edgePreviewRect = drop.slot;
+                root.windowDrop = drop;
+                if (!root.visible) {
+                    root.targetTitle = "";
+                    root.targetIconName = "";
+                    root.visible = true;
+                }
+                return;
+            }
+            if (root.windowDrop) {
+                // moved off the window - same pull-back as the edge branch above
+                root.windowDrop = null;
                 root.visible = false;
                 if (root.dragAutoTrigger) {
                     root.autoDragPending = true;
@@ -1095,6 +1156,11 @@ PlasmaCore.Dialog {
         root.nativeDragActive = false;
         root.nativeDragWindow = null;
         root.autoDragPending = false;
+        // only a drop that was actually previewed commits; re-resolved from the release
+        // position below, like the edge-drop, in case the target moved or closed.
+        const windowDropArmed = root.windowDropWatch && root.windowDrop !== null;
+        root.windowDropWatch = false;
+        root.windowDrop = null;
         if (root.visible && root.dragTriggered && root.targetWindow === win) {
             root.dragCurrent = root.externalCanvasPoint();
             root.finishDrag();
@@ -1124,7 +1190,14 @@ PlasmaCore.Dialog {
             if (target && target.width > 0 && target.height > 0) {
                 root.targetWindow = win;
                 root.commit(target.x, target.y, target.width, target.height);
+                return;
             }
+        }
+        if (windowDropArmed) {
+            const drop = root.windowDropTarget(win);
+            root.edgePreviewRect = Qt.rect(0, 0, 0, 0);
+            root.visible = false;
+            if (drop) root.commitWindowDrop(win, drop);
         }
         // snapGaps deliberately does NOT trigger here - a plain native window resize (edge/
         // corner drag with the mouse) has nothing to do with VibeTiles; it only follows a
@@ -1142,12 +1215,14 @@ PlasmaCore.Dialog {
             root.autoDragPending = false;
             // likewise tear down any armed edge-drop preview for the window that just died,
             // so its overlay can't linger and can't commit against a dead window.
-            if (root.edgeDropWatch || root.edgePreview) {
+            if (root.edgeDropWatch || root.edgePreview || root.windowDrop) {
                 root.edgePreview = false;
                 root.edgeDropWatch = false;
                 root.edgePreviewRect = Qt.rect(0, 0, 0, 0);
                 root.visible = false;
             }
+            root.windowDropWatch = false;
+            root.windowDrop = null;
         }
         // a dead window's remembered size is dead too - drop it whatever drag it was in
         root.forgetSize(win);
@@ -2039,6 +2114,101 @@ PlasmaCore.Dialog {
         return fractionRect;
     }
 
+    // Drop-onto-window target for a native drag of `win`: the topmost other real window
+    // under the cursor, and what the drop would do to it. Returns null when there's nothing
+    // to drop onto, else {target, zone, slot, rest} - slot is where `win` lands, rest is
+    // what the target keeps, both pre-gap-inset like everything commit() takes.
+    //
+    // The split works on the target's rect grown back out by windowGap/2 (clipped to the
+    // work area), i.e. the tile it was placed into, so both halves come out with the same
+    // gap spacing as a grid placement.
+    function windowDropTarget(win) {
+        if (!win || !root.isRealWindow(win)) return null;
+        const p = Workspace.cursorPos;
+        const wins = Workspace.stackingOrder;
+        let target = null, tg = null;
+        // stackingOrder is bottom-to-top, so walk it backwards for the topmost hit
+        for (let i = wins.length - 1; i >= 0; i--) {
+            const ow = wins[i];
+            try {
+                if (ow === win || !root.isRealWindow(ow) || ow.fullScreen) continue;
+                if (!ow.onAllDesktops && ow.desktops.indexOf(Workspace.currentDesktop) < 0) continue;
+                const g = ow.frameGeometry;
+                if (p.x >= g.x && p.x < g.x + g.width && p.y >= g.y && p.y < g.y + g.height) {
+                    target = ow;
+                    tg = Qt.rect(g.x, g.y, g.width, g.height);
+                    break;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        if (!target) return null;
+        const screen = root.screenAt(p);
+        if (!screen) return null;
+        root.rehomeForScreen(screen);
+        const half = root.windowGap / 2;
+        const outer = root.rectIntersect(
+            Qt.rect(tg.x - half, tg.y - half, tg.width + root.windowGap, tg.height + root.windowGap),
+            root.availGeo);
+        if (outer.width < 100 || outer.height < 100) return null;
+        const fx = (p.x - tg.x) / tg.width, fy = (p.y - tg.y) / tg.height;
+        const dists = [["left", fx], ["right", 1 - fx], ["top", fy], ["bottom", 1 - fy]];
+        let zone = "center", best = root.windowDropBand;
+        for (let i = 0; i < dists.length; i++) {
+            if (dists[i][1] < best) { best = dists[i][1]; zone = dists[i][0]; }
+        }
+        if (zone === "center") {
+            const o = root.dragOriginGeo;
+            if (o.width < 50 || o.height < 50) return null;
+            return { target: target, zone: zone, slot: outer,
+                     rest: Qt.rect(o.x - half, o.y - half, o.width + root.windowGap,
+                                   o.height + root.windowGap) };
+        }
+        const hw = Math.round(outer.width / 2), hh = Math.round(outer.height / 2);
+        let slot, rest;
+        if (zone === "left") {
+            slot = Qt.rect(outer.x, outer.y, hw, outer.height);
+            rest = Qt.rect(outer.x + hw, outer.y, outer.width - hw, outer.height);
+        } else if (zone === "right") {
+            rest = Qt.rect(outer.x, outer.y, hw, outer.height);
+            slot = Qt.rect(outer.x + hw, outer.y, outer.width - hw, outer.height);
+        } else if (zone === "top") {
+            slot = Qt.rect(outer.x, outer.y, outer.width, hh);
+            rest = Qt.rect(outer.x, outer.y + hh, outer.width, outer.height - hh);
+        } else {
+            rest = Qt.rect(outer.x, outer.y, outer.width, hh);
+            slot = Qt.rect(outer.x, outer.y + hh, outer.width, outer.height - hh);
+        }
+        return { target: target, zone: zone, slot: slot, rest: rest };
+    }
+
+    // gap-inset final geometry for a pre-inset rect, same math as commit()
+    function gapInset(r) {
+        const inset = root.windowGap / 2;
+        return Qt.rect(Math.round(r.x + inset), Math.round(r.y + inset),
+                       Math.round(Math.max(50, r.width - root.windowGap)),
+                       Math.round(Math.max(50, r.height - root.windowGap)));
+    }
+
+    // Apply a windowDropTarget() result. Deliberately not routed through commit(): the drop
+    // already decides both windows' geometry, so the overlap-resize/relocate passes there
+    // would only second-guess it.
+    function commitWindowDrop(win, drop) {
+        try {
+            root.rememberSize(win, win.frameGeometry);
+            root.rememberSize(drop.target, drop.target.frameGeometry);
+            drop.target.setMaximize(false, false);
+            drop.target.frameGeometry = root.gapInset(drop.rest);
+            win.setMaximize(false, false);
+            win.frameGeometry = root.gapInset(drop.slot);
+            Workspace.activeWindow = win;
+        } catch (e) {
+            // either window can die between the release and these writes
+            console.warn("vibetiles: window drop failed:", e);
+        }
+    }
+
     function finishDrag() {
         root.dragging = false;
         const r = root.snappedRect();
@@ -2173,6 +2343,37 @@ PlasmaCore.Dialog {
     // top-left (i.e., screen origin minus screenGeo.{x,y}). So we snap in screen coords
     // and convert to mainItem-local by subtracting screenGeo.x (= availGeo.x - availLocalX).
     // With windowGap/2 baked in so commit()'s inset geometry matches the outline exactly.
+    // Drop-onto-window: where the window under the cursor ends up (windowDrop.rest), drawn
+    // next to the main ghost, which shows the dragged window's slot. Fainter than the ghost
+    // so it's clear which one is the window being dropped. Same screen-to-mainItem
+    // conversion and gap inset as the ghost's edge-drop branch.
+    Rectangle {
+        id: targetGhost
+        readonly property var drop: root.windowDrop
+        // hold the last rect and only animate once shown, same as the ghost's held/settled -
+        // otherwise it slides in from (0,0) when it first appears
+        property rect held: Qt.rect(0, 0, 0, 0)
+        property bool settled: false
+        onDropChanged: {
+            if (drop) held = drop.rest;
+            if (!drop) settled = false;
+            else if (!settled) Qt.callLater(() => targetGhost.settled = targetGhost.drop !== null);
+        }
+        visible: drop !== null
+        x: held.x - root.availGeo.x + root.availLocalX + root.windowGap / 2
+        y: held.y - root.availGeo.y + root.availLocalY + root.windowGap / 2
+        width: Math.max(0, held.width - root.windowGap)
+        height: Math.max(0, held.height - root.windowGap)
+        color: root.themeAlpha(Kirigami.Theme.backgroundColor, 0.35)
+        border.color: root.themeAlpha(Kirigami.Theme.textColor, 0.5)
+        border.width: 2
+        radius: 4
+        Behavior on x { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on y { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: targetGhost.settled; NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+    }
+
     Rectangle {
         id: ghost
         property rect g: {
@@ -2180,7 +2381,7 @@ PlasmaCore.Dialog {
             // target (post-snap/expand or the empty-screen half). Convert to mainItem-local
             // (subtract screenGeo origin, == availGeo.x - availLocalX) and inset windowGap/2
             // so the outline lands exactly where commit() will put the window.
-            if (root.edgePreview) {
+            if (root.edgePreview || root.windowDrop) {
                 const er = root.edgePreviewRect;
                 if (er.width < 10 || er.height < 10) return Qt.rect(0, 0, 0, 0);
                 return Qt.rect(
@@ -2202,7 +2403,8 @@ PlasmaCore.Dialog {
                 Math.max(0, screenW - root.windowGap),
                 Math.max(0, screenH - root.windowGap));
         }
-        readonly property bool shown: root.ghostPreview && (root.dragging || root.edgePreview)
+        readonly property bool shown: (root.ghostPreview || root.windowDrop !== null)
+            && (root.dragging || root.edgePreview || root.windowDrop !== null)
             && g.width > 0 && g.height > 0
         // Last valid target geometry. x/y/width/height bind to this, not to g directly: when
         // the preview is dismissed g collapses to (0,0,0,0), and binding the geometry straight
@@ -2256,7 +2458,7 @@ PlasmaCore.Dialog {
         // hidden in native edge-drop preview: that mode shows only the ghost outline, no
         // grid box (there's no cell selection to make - the target is derived from the
         // cursor's edge, and the overlay never receives pointer events during a native drag).
-        visible: !root.edgePreview
+        visible: !root.edgePreview && !root.windowDrop
         x: root.canvasX
         y: root.canvasY
         width: root.canvasWidth

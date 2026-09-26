@@ -59,6 +59,10 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
   half of the screen when nothing else is there), with a live shadowed preview.
   Plays alongside auto-trigger — the picker handles mid-screen drags, the edge
   takes over at the edges.
+- **Drop onto a window** (opt-in) — Trellis-style docking: drag a window over
+  another one and drop it near one of its sides (the outer 28%) to split that window
+  in half, with the dropped window taking the half on that side. Drop in the middle
+  to swap the two. A live preview outlines both windows' new spots.
 - **Restore size on drag** (opt-in) — Windows-style unsnap: the size a window
   had *before* VibeTiles placed it is remembered, and handed back the moment you
   drag that window out by its titlebar, with the window staying under your
@@ -88,6 +92,8 @@ Also available from the [KDE Store](https://store.kde.org/p/2366344), and by ext
 | Hold the shortcut *during* a window drag | overlay retargets the dragged window |
 | `Meta+Alt+E` | expands the active window to fill the free space around it |
 | Drag a window onto a screen edge (with edge-drop on) | snaps + fills the reachable free space (or that half of the screen) |
+| Drag a window onto another window's side (with drop-onto-window on) | that window gives up the half on that side to the dragged one |
+| Drag a window onto the middle of another (with drop-onto-window on) | the two windows swap places |
 | Drag a window into a screen corner (with edge-drop on) | same, clipped to that quarter of the screen |
 
 Cancel is right-click rather than `Escape` deliberately: script-owned overlay
@@ -144,6 +150,7 @@ Configure...**.
 | `dragAutoTrigger` | false | auto-show picker on any native window drag |
 | `autoAtCursor` | false | auto-trigger picker spawns next to the cursor instead of fixed top-center |
 | `autoExpandOnEdgeDrag` | false | drag a window by the mouse onto a screen edge to snap + fill the free space (grid-overlay drops keep their selected size) |
+| `dropOnWindow` | false | drop a dragged window near a side of another window to split it, or in its middle to swap them |
 | `snapGaps` | false | after a grid/compact placement, close a small leftover gap to an off-grid neighbour |
 | `snapGapMax` | 200 | px cap on how far a `snapGaps` edge may grow |
 | `restoreSizeOnDrag` | false | dragging a placed window out by its titlebar gives it back the size it had before VibeTiles placed it (Windows-style unsnap); forgotten once you resize it by hand |
